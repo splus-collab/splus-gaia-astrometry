@@ -51,9 +51,9 @@ if __name__ == '__main__':
     lmt = np.percentile(abspm[~mx.mask], 95)
     mask = (abspm < lmt) & ~mx.mask
     # calculate splus - gaia declination
-    dediff = 3600. * (finalscat['DELTA_J2000']*u.deg - finalgaia['DEJ2000']*u.deg)[mask]
+    dediff = 3600. * (finalscat['DELTA_J2000']*u.deg - finalgaia['DEJ2000'])[mask]
     # calculate splus - gaia ra
-    radiff = np.cos(scat['DELTA_J2000']*u.deg)[mask] * 3600. * scat['ALPHA_J2000'][mask]*u.deg
-    radiff -= np.cos(finalgaia['DEJ2000']*u.deg)[mask] * 3600. * finalgaia['RAJ2000'][mask]*u.deg
+    radiff = np.cos(finalscat['DELTA_J2000'])[mask] * 3600. * finalscat['ALPHA_J2000'][mask]
+    radiff -= np.cos(finalgaia['DEJ2000'])[mask] * 3600. * finalgaia['RAJ2000'][mask]
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
