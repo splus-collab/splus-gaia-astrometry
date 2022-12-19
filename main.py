@@ -32,7 +32,7 @@ if __name__ == '__main__':
     tile_coords =SkyCoord(ra=sra[0], dec=sdec[0], unit=(u.hour, u.deg), frame='icrs', equinox='J2000')
     gaia_data = get_gaia(tile_coords)
 
-    scat = fits.open('/ssd/splus/mar_coadded/' + tile + '_R_swp_cat.fits')[2].data
+    scat = fits.open('/storage2/share/MAR-gaia-astrometry/' + tile + '_R_homo1945_3451.detection.cat')[2].data
     splus_coords = SkyCoord(ra=scat['ALPHA_J2000'], dec=scat['DELTA_J2000'], unit=(u.deg, u.deg))
     gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
     idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
