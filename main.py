@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     sample = (scat['MAG_AUTO'] > 13) & (scat['MAG_AUTO'] < 19)
     sample &= scat['FLAGS'] == 0
-    # sample &= scat['CLASS_STAR' > 0.95] # MAR cat nao tem CLASS_STAR
+    sample &= scat['CLASS_STAR'] > 0.95 # MAR cat nao tem CLASS_STAR
 
     finalscat = scat[separation & sample]
     finalgaia = gaia_data[idx][separation & sample]
