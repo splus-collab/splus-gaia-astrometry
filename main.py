@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import multiprocessing
 import sys
 import time
+import glob
 from pathlib import Path
 path_root = Path(__file__).parents[2]
 sys.path.append(str(path_root))
@@ -49,7 +50,7 @@ def get_gaia(workdir, tile_coords, tilename, gaia_dr):
     return gaia_data
 
 
-def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='splus_cats/', cat_name_suffix='.fits'):
+def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='splus_cats/', cat_name_suffix='_dual_aper.fits'):
     """Calculate the astrometric differences between any SPLUS catalogue as long as the columns are properly named"""
 
     field_names = np.array([n.replace('_', '-') for n in footprint['NAME']])
@@ -79,8 +80,8 @@ def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='spl
             separation = d2d < 5.0 * u.arcsec
 
             sample = (scat['r_auto'] > 13) & (scat['r_auto'] < 19)
-            sample &= scat['PhotoFlagDet'] == 0
-            sample &= scat['CLASS_STAR'] > 0.95 # MAR cat nao tem CLASS_STAR
+            sample &= scat['SEX_FLAGS_r'] == 0
+            #sample &= scat['CLASS_STAR'] > 0.95 # MAR cat nao tem CLASS_STAR
 
             finalscat = scat[separation & sample]
             finalgaia = gaia_data[idx][separation & sample]
@@ -216,17 +217,16 @@ def plot_diffs(datatab):
 
 
 if __name__ == '__main__':
-    get_gaia = False
-    make_plot = True
+    get_gaia = True
+    make_plot = False
+
+    # workdir = '/ssd/splus/MAR-gaia-astrometry/'
+    # workdir = '/ssd/splus/iDR4_astrometry/'
+    workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry/'
 
     if get_gaia:
-        # workdir = '/ssd/splus/MAR-gaia-astrometry/'
-        # workdir = '/ssd/splus/iDR4_astrometry/'
-        workdir = '/storage/splus/splusDR3-gaiaDR3-astrometry/'
         footprint = ascii.read(workdir + 'tiles_new_status.csv')
-        fields = pd.read_csv(workdir + 'dr3_fields.csv')
-        # field_name_suffix = '_R_dual.catalog'
-        # field_name_suffix = '_R.detection.cat'
+        fields = pd.read_csv(workdir + 'dr4_fields.csv')
         # field_name_preffix = 'sex_'
         # field_name_suffix = '_R_dual.fits'
         gaia_dr = 'DR3'
@@ -282,6 +282,6 @@ if __name__ == '__main__':
             new_tab = pd.concat([new_tab, t], axis=0)
         datatab = workdir + 'results/results_stacked.csv'
         print('saving results to', datatab)
-        results.to_csv(datatab, index=False)
+        new_tab.to_csv(datatab, index=False)
 
         plot_diffs(datatab)
