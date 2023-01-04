@@ -72,13 +72,13 @@ def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='spl
             # if cathdu == 2:
             # scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[2].data
             scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[1].data
-            splus_coords = SkyCoord(ra=scat['ALPHA_J2000'], dec=scat['DELTA_J2000'], unit=(u.deg, u.deg))
+            splus_coords = SkyCoord(ra=scat['RA'], dec=scat['DEC'], unit=(u.deg, u.deg))
             gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
             idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
             separation = d2d < 5.0 * u.arcsec
 
-            sample = (scat['MAG_AUTO'] > 13) & (scat['MAG_AUTO'] < 19)
-            sample &= scat['FLAGS'] == 0
+            sample = (scat['r_auto'] > 13) & (scat['r_auto'] < 19)
+            sample &= scat['PhotoFlagDet'] == 0
             sample &= scat['CLASS_STAR'] > 0.95 # MAR cat nao tem CLASS_STAR
 
             finalscat = scat[separation & sample]
@@ -90,9 +90,9 @@ def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='spl
             lmt = np.percentile(abspm[~mx.mask], 95)
             mask = (abspm < lmt) & ~mx.mask
             # calculate splus - gaia declination
-            dediff = 3600. * (finalscat['DELTA_J2000'][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
+            dediff = 3600. * (finalscat['DEC'][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
             # calculate splus - gaia ra
-            radiff = (finalscat['ALPHA_J2000'][mask] - finalgaia['RAJ2000'][mask]) * 3600.
+            radiff = (finalscat['RA'][mask] - finalgaia['RAJ2000'][mask]) * 3600.
             #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
             #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
 
