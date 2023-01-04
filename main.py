@@ -64,6 +64,7 @@ def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='spl
 
             gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
             if os.path.isfile(gaia_cat_path):
+                print('reading gaia cat from database')
                 gaia_data = ascii.read(gaia_cat_path, format='csv')
             else:
                 gaia_data = get_gaia(workdir, tile_coords, tile, gaia_dr)
@@ -103,6 +104,7 @@ def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='spl
             d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
             results = pd.DataFrame(data=d)
             path_to_results = results_dir + tile + '_splus-gaiaDR3_diff.csv'
+            print('saving results to', path_to_results)
             results.to_csv(path_to_results, index=False)
 
     return
@@ -226,8 +228,8 @@ if __name__ == '__main__':
     gaia_dr = 'DR3'
 
     # calculate to all tiles at once
-    num_procs = 2
-    b = list(fields['NAME'][:1])
+    num_procs = 12
+    b = list(fields['NAME'])
     num_fields = np.unique(b).size
     if num_fields % num_procs > 0:
         print('reprojecting', num_fields, 'fields')
