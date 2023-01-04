@@ -216,62 +216,72 @@ def plot_diffs(datatab):
 
 
 if __name__ == '__main__':
-    # workdir = '/ssd/splus/MAR-gaia-astrometry/'
-    # workdir = '/ssd/splus/iDR4_astrometry/'
-    workdir = '/storage/splus/splusDR3-gaiaDR3-astrometry/'
-    footprint = ascii.read(workdir + 'tiles_new_status.csv')
-    fields = pd.read_csv(workdir + 'dr3_fields.csv')
-    # field_name_suffix = '_R_dual.catalog'
-    # field_name_suffix = '_R.detection.cat'
-    # field_name_preffix = 'sex_'
-    # field_name_suffix = '_R_dual.fits'
-    gaia_dr = 'DR3'
+    get_gaia = False
+    make_plot = True
 
-    # calculate to all tiles at once
-    num_procs = 12
-    b = list(fields['NAME'])
-    num_fields = np.unique(b).size
-    if num_fields % num_procs > 0:
-        print('reprojecting', num_fields, 'fields')
-        increase_to = int(num_fields / num_procs) + 1
-        i = 0
-        while i < (increase_to * num_procs - num_fields):
-            b.append('fakename')
-            i += 1
-        else:
-            print(num_fields, 'already fulfill the conditions')
-    tiles = np.array(b).reshape((num_procs, int(np.array(b).size / num_procs)))
-    print('calculating for a total of', tiles.size, 'fields')
-    jobs = []
-    print('creating', num_procs, 'jobs...')
-    for tile in tiles:
-        process = multiprocessing.Process(target=calculate_astdiff, args=(tile, footprint, workdir, gaia_dr))
-        jobs.append(process)
+    if get_gaia:
+        # workdir = '/ssd/splus/MAR-gaia-astrometry/'
+        # workdir = '/ssd/splus/iDR4_astrometry/'
+        workdir = '/storage/splus/splusDR3-gaiaDR3-astrometry/'
+        footprint = ascii.read(workdir + 'tiles_new_status.csv')
+        fields = pd.read_csv(workdir + 'dr3_fields.csv')
+        # field_name_suffix = '_R_dual.catalog'
+        # field_name_suffix = '_R.detection.cat'
+        # field_name_preffix = 'sex_'
+        # field_name_suffix = '_R_dual.fits'
+        gaia_dr = 'DR3'
 
-    # calculate_astdiff(fields, footprint, workdir, gaia_dr,
-    #                   cat_name_preffix=field_name_preffix, cat_name_suffix=field_name_suffix)
+        # calculate to all tiles at once
+        num_procs = 12
+        b = list(fields['NAME'])
+        num_fields = np.unique(b).size
+        if num_fields % num_procs > 0:
+            print('reprojecting', num_fields, 'fields')
+            increase_to = int(num_fields / num_procs) + 1
+            i = 0
+            while i < (increase_to * num_procs - num_fields):
+                b.append('fakename')
+                i += 1
+            else:
+                print(num_fields, 'already fulfill the conditions')
+        tiles = np.array(b).reshape((num_procs, int(np.array(b).size / num_procs)))
+        print('calculating for a total of', tiles.size, 'fields')
+        jobs = []
+        print('creating', num_procs, 'jobs...')
+        for tile in tiles:
+            process = multiprocessing.Process(target=calculate_astdiff, args=(tile, footprint, workdir, gaia_dr))
+            jobs.append(process)
 
-    # start jobs
-    print('starting', num_procs, 'jobs!')
-    for j in jobs:
-        j.start()
+        # calculate_astdiff(fields, footprint, workdir, gaia_dr,
+        #                   cat_name_preffix=field_name_preffix, cat_name_suffix=field_name_suffix)
 
-    # check if any of the jobs initialized previously still alive
-    # save resulting table after all are finished
-    proc_alive = True
-    while proc_alive:
-        if any(proces.is_alive() for proces in jobs):
-            proc_alive = True
-            time.sleep(1)
-        else:
-            print('All jobs finished')
-            proc_alive = False
+        # start jobs
+        print('starting', num_procs, 'jobs!')
+        for j in jobs:
+            j.start()
 
-    print('Done!')
+        # check if any of the jobs initialized previously still alive
+        # save resulting table after all are finished
+        proc_alive = True
+        while proc_alive:
+            if any(proces.is_alive() for proces in jobs):
+                proc_alive = True
+                time.sleep(1)
+            else:
+                print('All jobs finished')
+                proc_alive = False
 
-    # to run only after finished all stacking
-    # datatab = workdir + 'results/' + fields[0] + '_splus-gaiaDR3_diff.csv'
-    #
-    # plot_diffs(datatab)
+        print('Done!')
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    if make_plot:
+        # to run only after finished all stacking
+        list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
+        new_tab = pd.read_csv(list_results[0])
+        for tab in list_results[1:]:
+            t = pd.read_csv(tab)
+            new_tab = pd.concat([new_tab, t], axis=0)
+        datatab = workdir + 'results/results_stacked.csv'
+        print('saving results to', datatab)
+        results.to_csv(datatab, index=False)
+
+        plot_diffs(datatab)
