@@ -218,7 +218,7 @@ if __name__ == '__main__':
     # workdir = '/ssd/splus/iDR4_astrometry/'
     workdir = '/storage/splus/splusDR3-gaiaDR3-astrometry/'
     footprint = ascii.read(workdir + 'tiles_new_status.csv')
-    fields = pd.read_csv(workdir + 'dr3_fields.csv')['NAME'][:1]
+    fields = pd.read_csv(workdir + 'dr3_fields.csv')
     # field_name_suffix = '_R_dual.catalog'
     # field_name_suffix = '_R.detection.cat'
     # field_name_preffix = 'sex_'
@@ -227,7 +227,7 @@ if __name__ == '__main__':
 
     # calculate to all tiles at once
     num_procs = 2
-    b = list(fields['NAME'])
+    b = list(fields['NAME'][:1])
     num_fields = np.unique(b).size
     if num_fields % num_procs > 0:
         print('reprojecting', num_fields, 'fields')
