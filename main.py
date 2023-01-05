@@ -34,6 +34,7 @@ class SplusGaiaAst(object):
         self.mag_column: str = 'MAG_AUTO'
         self.flags_column: str = 'FLAGS'
         self.clstar_column = None
+        self.filetype = '.fits'
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None):
         """query gaia DR3 for photometry products"""
@@ -76,6 +77,9 @@ class SplusGaiaAst(object):
         cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
 
         field_names = np.array([n.replace('_', '-') for n in footprint['NAME']])
+        results_dir = workdir + 'results/'
+        if not os.path.isdir(results_dir):
+            os.mkdir(results_dir)
 
         for tile in fields:
             if tile == 'fakename':
@@ -92,7 +96,19 @@ class SplusGaiaAst(object):
                 else:
                     gaia_data = self.get_gaia(tile_coords, tile)
 
-                scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
+                if self.filetype == '.fits':
+                    try:
+                        scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
+                    except TypeError:
+                        print('catalogue is not in fits format. Define the proper format of the default variable filetype')
+                elif self.filetype == '.csv':
+                    try:
+                        scat = pd.read_csv(workdir + cat_name_preffix + tile + cat_name_suffix)
+                    except TypeError:
+                        print('catalogue is not in csv format. Define the proper format of the default variable filetype')
+                else:
+                    raise TypeError('filetype for input catalogue not supported. Use .fits or .csv')
+
                 splus_coords = SkyCoord(ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
                 gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
                 idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
@@ -122,10 +138,6 @@ class SplusGaiaAst(object):
                 radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
                 #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
                 #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
-
-                results_dir = workdir + 'results/'
-                if not os.path.isdir(results_dir):
-                    os.mkdir(results_dir)
 
                 d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
                 results = pd.DataFrame(data=d)
