@@ -85,65 +85,68 @@ class SplusGaiaAst(object):
             if tile == 'fakename':
                 print('this is a filler name')
             else:
-                sra = footprint['RA'][field_names == tile]
-                sdec = footprint['DEC'][field_names == tile]
-                tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(u.hour, u.deg), frame='icrs', equinox='J2000')
-
-                gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
-                if os.path.isfile(gaia_cat_path):
-                    print('reading gaia cat from database')
-                    gaia_data = ascii.read(gaia_cat_path, format='csv')
-                else:
-                    gaia_data = self.get_gaia(tile_coords, tile)
-
-                if self.filetype == '.fits':
-                    try:
-                        scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
-                    except TypeError:
-                        print('catalogue is not in fits format. Define the proper format of the default variable filetype')
-                elif self.filetype == '.csv':
-                    try:
-                        scat = pd.read_csv(workdir + cat_name_preffix + tile + cat_name_suffix)
-                    except TypeError:
-                        print('catalogue is not in csv format. Define the proper format of the default variable filetype')
-                else:
-                    raise TypeError('filetype for input catalogue not supported. Use .fits or .csv')
-
-                splus_coords = SkyCoord(ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
-                gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
-                idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
-                separation = d2d < 5.0 * u.arcsec
-
-                sample = (scat[self.mag_column] > 13) & (scat[self.mag_column] < 19)
-                sample &= scat[self.flags_column] == 0
-                if self.clstar_column is None:
-                    print('Not considering CLASS_STAR as an option to select objects')
-                else:
-                    try:
-                        sample &= scat[self.clstar_column] > 0.95 # MAR cat nao tem CLASS_STAR
-                    finally:
-                        Warning('Column for CLASS_STAR not found. Ignoring')
-
-                finalscat = scat[separation & sample]
-                finalgaia = gaia_data[idx][separation & sample]
-
-                abspm = abs(finalgaia['pmRA']) + abs(finalgaia['pmDE'])
-                # get masked values in gaia
-                mx = np.ma.masked_invalid(abspm)
-                lmt = np.percentile(abspm[~mx.mask], 95)
-                mask = (abspm < lmt) & ~mx.mask
-                # calculate splus - gaia declination
-                dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
-                # calculate splus - gaia ra
-                radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
-                #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
-                #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
-
-                d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
-                results = pd.DataFrame(data=d)
                 path_to_results = results_dir + tile + '_splus-gaiaDR3_diff.csv'
-                print('saving results to', path_to_results)
-                results.to_csv(path_to_results, index=False)
+                if os.path.isfile(path_to_results):
+                    print('catalogue for tile', tile, 'already exists. Skipping')
+                else:
+                    sra = footprint['RA'][field_names == tile]
+                    sdec = footprint['DEC'][field_names == tile]
+                    tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(u.hour, u.deg), frame='icrs', equinox='J2000')
+
+                    gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
+                    if os.path.isfile(gaia_cat_path):
+                        print('reading gaia cat from database')
+                        gaia_data = ascii.read(gaia_cat_path, format='csv')
+                    else:
+                        gaia_data = self.get_gaia(tile_coords, tile)
+
+                    if self.filetype == '.fits':
+                        try:
+                            scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
+                        except TypeError:
+                            print('catalogue is not in fits format. Define the proper format of the default variable filetype')
+                    elif self.filetype == '.csv':
+                        try:
+                            scat = pd.read_csv(workdir + cat_name_preffix + tile + cat_name_suffix)
+                        except TypeError:
+                            print('catalogue is not in csv format. Define the proper format of the default variable filetype')
+                    else:
+                        raise TypeError('filetype for input catalogue not supported. Use .fits or .csv')
+
+                    splus_coords = SkyCoord(ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
+                    gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
+                    idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
+                    separation = d2d < 5.0 * u.arcsec
+
+                    sample = (scat[self.mag_column] > 13) & (scat[self.mag_column] < 19)
+                    sample &= scat[self.flags_column] == 0
+                    if self.clstar_column is None:
+                        print('Not considering CLASS_STAR as an option to select objects')
+                    else:
+                        try:
+                            sample &= scat[self.clstar_column] > 0.95 # MAR cat nao tem CLASS_STAR
+                        finally:
+                            Warning('Column for CLASS_STAR not found. Ignoring')
+
+                    finalscat = scat[separation & sample]
+                    finalgaia = gaia_data[idx][separation & sample]
+
+                    abspm = abs(finalgaia['pmRA']) + abs(finalgaia['pmDE'])
+                    # get masked values in gaia
+                    mx = np.ma.masked_invalid(abspm)
+                    lmt = np.percentile(abspm[~mx.mask], 95)
+                    mask = (abspm < lmt) & ~mx.mask
+                    # calculate splus - gaia declination
+                    dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
+                    # calculate splus - gaia ra
+                    radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
+                    #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
+                    #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
+
+                    d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
+                    results = pd.DataFrame(data=d)
+                    print('saving results to', path_to_results)
+                    results.to_csv(path_to_results, index=False)
 
         return
 
