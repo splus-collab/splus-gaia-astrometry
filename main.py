@@ -42,12 +42,16 @@ class SplusGaiaAst(object):
         print('querying gaia/vizier')
         workdir = self.workdir if workdir is None else workdir
         gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
+
         if gaia_dr == 'DR2':
             catalognumb = '345'
         elif gaia_dr == 'DR3':
             catalognumb = '355'
         else:
             raise IOError('Check Gaia DR number via vizier page')
+
+        # change cache location
+        Vizier.cache_location = workdir
 
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
         v.ROW_LIMIT = 999999999
