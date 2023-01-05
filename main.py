@@ -53,7 +53,10 @@ class SplusGaiaAst(object):
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
         v.ROW_LIMIT = 999999999
         # change cache location
-        v.cache_location = workdir * '.astropy/cache/astroquery/Vizier/'
+        cache_path = workdir + '.astropy/cache/astroquery/Vizier/'
+        if not os.path.isdir(cache_path):
+            os.makedirs(cache_path, exist_ok=True)
+        v.cache_location = cache_path
         gaia_data = v.query_region(tile_coords, radius=Angle(1.0, "deg"))[0]
         mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
         gaia_data = gaia_data[~mask]
