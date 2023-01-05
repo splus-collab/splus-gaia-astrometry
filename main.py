@@ -50,11 +50,10 @@ class SplusGaiaAst(object):
         else:
             raise IOError('Check Gaia DR number via vizier page')
 
-        # change cache location
-        Vizier.cache_location = workdir
-
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
         v.ROW_LIMIT = 999999999
+        # change cache location
+        v.cache_location = workdir
         gaia_data = v.query_region(tile_coords, radius=Angle(1.0, "deg"))[0]
         mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
         gaia_data = gaia_data[~mask]
