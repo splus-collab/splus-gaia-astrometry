@@ -90,7 +90,7 @@ class SplusGaiaAst(object):
                     print('reading gaia cat from database')
                     gaia_data = ascii.read(gaia_cat_path, format='csv')
                 else:
-                    gaia_data = self.get_gaia(workdir, tile_coords, tile, gaia_dr)
+                    gaia_data = self.get_gaia(tile_coords, tile)
 
                 scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
                 splus_coords = SkyCoord(ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
