@@ -4,6 +4,7 @@
 import numpy as np
 import scipy
 import scipy.stats
+import matplotlib.pyplot as plt
 
 def bining(x, y, z, nbins = 10, xlim = (None, None), ylim = (None, None),
            zlim = (None, None)):
@@ -106,7 +107,7 @@ def contour_pdf(x_axis, y_axis, ax=None, nbins=10, percent=10, colors='b'):
     r = pdf([q.flatten(), w.flatten()])
     s = scipy.stats.scoreatpercentile(pdf(pdf.resample(1000)), percent)
     r.shape = (nbins, nbins)
-    if ax == None:
+    if ax is None:
         contour = plt.contour(np.linspace(xmin, xmax, nbins),
                               np.linspace(ymin, ymax, nbins),
                               r, [s], linewidths=1.5, colors=colors)
