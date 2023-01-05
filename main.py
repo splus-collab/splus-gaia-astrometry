@@ -17,9 +17,10 @@ import multiprocessing
 import sys
 import time
 import glob
-from pathlib import Path
-path_root = Path(__file__).parents[2]
-sys.path.append(str(path_root))
+import os
+path_root = os.getcwd()
+sys.path.append(str(path_root) + '/splus-gaia-astrometry')
+from statspack.statspack import contour_pdf
 
 class SplusGaiaAst(object):
     """Class to calculate differences between the astrometry and SPLUS"""
@@ -125,7 +126,10 @@ class SplusGaiaAst(object):
                     separation = d2d < 5.0 * u.arcsec
 
                     sample = (scat[self.mag_column] > 13) & (scat[self.mag_column] < 19)
-                    sample &= scat[self.flags_column] == 0
+                    if self.flags_column is None:
+                        print('FLAGS column not available. Skipping using flags to select objects')
+                    else:
+                        sample &= scat[self.flags_column] == 0
                     if self.clstar_column is None:
                         print('Not considering CLASS_STAR as an option to select objects')
                     else:
@@ -157,7 +161,7 @@ class SplusGaiaAst(object):
         return
 
 
-def plot_diffs(datatab):
+def plot_diffs(datatab, contour=False):
     """plot results"""
 
     data = pd.read_csv(datatab)
@@ -196,12 +200,10 @@ def plot_diffs(datatab):
     ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
                       fontsize=12)
-    # contour_pdf(radiff.value, dediff.value, ax=ax_scatter, nbins=20,
-    #            percent=0.3, colors='r')
-    # contour_pdf(radiff.value, dediff.value, ax=ax_scatter, nbins=20,
-    #            percent=5, colors='orange')
-    # contour_pdf(radiff.value, dediff.value, ax=ax_scatter, nbins=20,
-    #            percent=32, colors='c')
+    if contour:
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=0.3, colors='limegreen')
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=4.55, colors='deeppink')
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=31.7, colors='c')
 
     cb = plt.colorbar(sc, ax=ax_histy, pad=.02)
     cb.set_label(r'$|\mu|\ \mathrm{[mas\,yr^{-1}]}$', fontsize=20)
@@ -270,7 +272,7 @@ if __name__ == '__main__':
 
     # workdir = '/ssd/splus/MAR-gaia-astrometry/'
     # workdir = '/ssd/splus/iDR4_astrometry/'
-    workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry/'
+    workdir = '/storage/splus/splusDR4_psf-gaiaDR3-astrometry/'
 
     if get_gaia:
         # initialize the class
@@ -278,12 +280,13 @@ if __name__ == '__main__':
 
         # define default paths and additives
         gasp.workdir = workdir
-        gasp.racolumn = 'RA'
-        gasp.decolumn = 'DEC'
+        gasp.racolumn = 'RA_r'
+        gasp.decolumn = 'DEC_r'
         gasp.cat_name_preffix = 'splus_cats/'
-        gasp.cat_name_suffix = '_R_dual.fits'
-        gasp.mag_column = 'r_auto'
-        gasp.flags_column = 'SEX_FLAGS_r'
+        gasp.cat_name_suffix = '_R_psf.fits'
+        gasp.mag_column = 'r_psf'
+        gasp.flags_column = None
+        gasp.clstar_column = 'CLASS_STAR_r'
 
         # read footprint table
         footprint = ascii.read(workdir + 'tiles_new_status.csv')
@@ -334,13 +337,14 @@ if __name__ == '__main__':
 
     if make_plot:
         # to run only after finished all stacking
-        list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
-        new_tab = pd.read_csv(list_results[0])
-        for tab in list_results[1:]:
-            t = pd.read_csv(tab)
-            new_tab = pd.concat([new_tab, t], axis=0)
         datatab = workdir + 'results/results_stacked.csv'
-        print('saving results to', datatab)
-        new_tab.to_csv(datatab, index=False)
+        if not os.path.isfile(datatab):
+            list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
+            new_tab = pd.read_csv(list_results[0])
+            for tab in list_results[1:]:
+                t = pd.read_csv(tab)
+                new_tab = pd.concat([new_tab, t], axis=0)
+            print('saving results to', datatab)
+            new_tab.to_csv(datatab, index=False)
 
-        plot_diffs(datatab)
+        plot_diffs(datatab, contour=False)
