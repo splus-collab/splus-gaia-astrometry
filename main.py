@@ -21,106 +21,133 @@ from pathlib import Path
 path_root = Path(__file__).parents[2]
 sys.path.append(str(path_root))
 
-def get_gaia(workdir, tile_coords, tilename, gaia_dr):
-    """query gaia DR3 for photometry products"""
+class SplusGaiaAst(object):
+    """Class to calculate differences between the astrometry and SPLUS"""
+    def __init__(self):
+        self.workdir: str = './'
+        self.gaia_dr: str = 'DR3'
+        self.cat_name_preffix: str = ''
+        self.cat_name_suffix: str = ''
+        self.cathdu: int = 1
+        self.racolumn: str = 'RA'
+        self.decolumn: str = 'DEC'
+        self.mag_column: str = 'MAG_AUTO'
+        self.flags_column: str = 'FLAGS'
+        self.clstar_column = None
 
-    print('querying gaia/vizier')
-    gaia_dr = gaia_dr
-    if gaia_dr == 'DR2':
-        catalognumb = '345'
-    elif gaia_dr == 'DR3':
-        catalognumb = '355'
-    else:
-        raise IOError('Check Gaia DR number via vizier page')
+    def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None):
+        """query gaia DR3 for photometry products"""
 
-    v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
-    v.ROW_LIMIT = 999999999
-    gaia_data = v.query_region(tile_coords, radius=Angle(1.0, "deg"))[0]
-    mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
-    gaia_data = gaia_data[~mask]
-    print('gaia_data is', gaia_data)
-
-    gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv'
-    if not os.path.isdir(workdir + 'gaia_' + gaia_dr):
-        os.mkdir(workdir + 'gaia_' + gaia_dr)
-
-    print('saving result of match with gaia to', gaia_cat_path)
-    gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
-
-    return gaia_data
-
-
-def calculate_astdiff(fields, footprint, workdir, gaia_dr, cat_name_preffix='splus_cats/', cat_name_suffix='_dual_aper.fits'):
-    """Calculate the astrometric differences between any SPLUS catalogue as long as the columns are properly named"""
-
-    field_names = np.array([n.replace('_', '-') for n in footprint['NAME']])
-
-    for tile in fields:
-        if tile == 'fakename':
-            print('this is a filler name')
+        print('querying gaia/vizier')
+        workdir = self.workdir if workdir is None else workdir
+        gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
+        if gaia_dr == 'DR2':
+            catalognumb = '345'
+        elif gaia_dr == 'DR3':
+            catalognumb = '355'
         else:
-            sra = footprint['RA'][field_names == tile]
-            sdec = footprint['DEC'][field_names == tile]
-            tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(u.hour, u.deg), frame='icrs', equinox='J2000')
+            raise IOError('Check Gaia DR number via vizier page')
 
-            gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
-            if os.path.isfile(gaia_cat_path):
-                print('reading gaia cat from database')
-                gaia_data = ascii.read(gaia_cat_path, format='csv')
+        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
+        v.ROW_LIMIT = 999999999
+        gaia_data = v.query_region(tile_coords, radius=Angle(1.0, "deg"))[0]
+        mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
+        gaia_data = gaia_data[~mask]
+        print('gaia_data is', gaia_data)
+
+        gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv'
+        if not os.path.isdir(workdir + 'gaia_' + gaia_dr):
+            os.mkdir(workdir + 'gaia_' + gaia_dr)
+
+        print('saving result of match with gaia to', gaia_cat_path)
+        gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
+
+        return gaia_data
+
+    def calculate_astdiff(self, fields, footprint, workdir=None, gaia_dr=None, cat_name_preffix=None,
+                          cat_name_suffix=None):
+        """
+        Calculate the astrometric differences between any SPLUS catalogue as long as the columns are properly named
+        """
+
+        gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
+        workdir = self.workdir if workdir is None else workdir
+        cat_name_preffix = self.cat_name_preffix if cat_name_preffix is None else cat_name_preffix
+        cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
+
+        field_names = np.array([n.replace('_', '-') for n in footprint['NAME']])
+
+        for tile in fields:
+            if tile == 'fakename':
+                print('this is a filler name')
             else:
-                gaia_data = get_gaia(workdir, tile_coords, tile, gaia_dr)
+                sra = footprint['RA'][field_names == tile]
+                sdec = footprint['DEC'][field_names == tile]
+                tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(u.hour, u.deg), frame='icrs', equinox='J2000')
 
-            # cathdu = 1
-            # if cathdu == 2:
-            # scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[2].data
-            scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[1].data
-            splus_coords = SkyCoord(ra=scat['RA'], dec=scat['DEC'], unit=(u.deg, u.deg))
-            gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
-            idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
-            separation = d2d < 5.0 * u.arcsec
+                gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
+                if os.path.isfile(gaia_cat_path):
+                    print('reading gaia cat from database')
+                    gaia_data = ascii.read(gaia_cat_path, format='csv')
+                else:
+                    gaia_data = self.get_gaia(workdir, tile_coords, tile, gaia_dr)
 
-            sample = (scat['r_auto'] > 13) & (scat['r_auto'] < 19)
-            sample &= scat['SEX_FLAGS_r'] == 0
-            #sample &= scat['CLASS_STAR'] > 0.95 # MAR cat nao tem CLASS_STAR
+                scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
+                splus_coords = SkyCoord(ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
+                gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
+                idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
+                separation = d2d < 5.0 * u.arcsec
 
-            finalscat = scat[separation & sample]
-            finalgaia = gaia_data[idx][separation & sample]
+                sample = (scat[self.mag_column] > 13) & (scat[self.mag_column] < 19)
+                sample &= scat[self.flags_column] == 0
+                if self.clstar_column is None:
+                    print('Not considering CLASS_STAR as an option to select objects')
+                else:
+                    try:
+                        sample &= scat[self.clstar_column] > 0.95 # MAR cat nao tem CLASS_STAR
+                    finally:
+                        Warning('Column for CLASS_STAR not found. Ignoring')
 
-            abspm = abs(finalgaia['pmRA']) + abs(finalgaia['pmDE'])
-            # get masked values in gaia
-            mx = np.ma.masked_invalid(abspm)
-            lmt = np.percentile(abspm[~mx.mask], 95)
-            mask = (abspm < lmt) & ~mx.mask
-            # calculate splus - gaia declination
-            dediff = 3600. * (finalscat['DEC'][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
-            # calculate splus - gaia ra
-            radiff = (finalscat['RA'][mask] - finalgaia['RAJ2000'][mask]) * 3600.
-            #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
-            #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
+                finalscat = scat[separation & sample]
+                finalgaia = gaia_data[idx][separation & sample]
 
-            results_dir = workdir + 'results/'
-            if not os.path.isdir(results_dir):
-                os.mkdir(results_dir)
+                abspm = abs(finalgaia['pmRA']) + abs(finalgaia['pmDE'])
+                # get masked values in gaia
+                mx = np.ma.masked_invalid(abspm)
+                lmt = np.percentile(abspm[~mx.mask], 95)
+                mask = (abspm < lmt) & ~mx.mask
+                # calculate splus - gaia declination
+                dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
+                # calculate splus - gaia ra
+                radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
+                #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
+                #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
 
-            d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
-            results = pd.DataFrame(data=d)
-            path_to_results = results_dir + tile + '_splus-gaiaDR3_diff.csv'
-            print('saving results to', path_to_results)
-            results.to_csv(path_to_results, index=False)
+                results_dir = workdir + 'results/'
+                if not os.path.isdir(results_dir):
+                    os.mkdir(results_dir)
 
-    return
+                d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
+                results = pd.DataFrame(data=d)
+                path_to_results = results_dir + tile + '_splus-gaiaDR3_diff.csv'
+                print('saving results to', path_to_results)
+                results.to_csv(path_to_results, index=False)
+
+        return
+
 
 def plot_diffs(datatab):
     """plot results"""
+
     data = pd.read_csv(datatab)
     radiff = data['radiff']
     dediff = data['dediff']
     abspm = data['abspm']
 
     # stats
-    mra = np.median(radiff)
+    # mra = np.median(radiff)
     percra = np.percentile(radiff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
-    mde = np.median(dediff)
+    # mde = np.median(dediff)
     percde = np.percentile(dediff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
 
     # definitions for the axes
@@ -225,11 +252,22 @@ if __name__ == '__main__':
     workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry/'
 
     if get_gaia:
+        # initialize the class
+        gasp = SplusGaiaAst()
+
+        # define default paths and additives
+        gasp.workdir = workdir
+        gasp.racolumn = 'RA'
+        gasp.decolumn = 'DEC'
+        gasp.cat_name_preffix = 'splus_cats/'
+        gasp.cat_name_suffix = '_R_dual.fits'
+        gasp.mag_column = 'r_auto'
+        gasp.flags_column = 'SEX_FLAGS_r'
+
+        # read footprint table
         footprint = ascii.read(workdir + 'tiles_new_status.csv')
+        # read list of fields to process
         fields = pd.read_csv(workdir + 'dr4_fields.csv')
-        # field_name_preffix = 'sex_'
-        # field_name_suffix = '_R_dual.fits'
-        gaia_dr = 'DR3'
 
         # calculate to all tiles at once
         num_procs = 12
@@ -249,7 +287,7 @@ if __name__ == '__main__':
         jobs = []
         print('creating', num_procs, 'jobs...')
         for tile in tiles:
-            process = multiprocessing.Process(target=calculate_astdiff, args=(tile, footprint, workdir, gaia_dr))
+            process = multiprocessing.Process(target=gasp.calculate_astdiff, args=(tile, footprint))
             jobs.append(process)
 
         # calculate_astdiff(fields, footprint, workdir, gaia_dr,
