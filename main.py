@@ -148,9 +148,9 @@ class SplusGaiaAst(object):
                     # calculate splus - gaia declination
                     dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
                     # calculate splus - gaia ra
-                    radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
-                    #radiff = np.cos(finalscat['DELTA_J2000']*u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
-                    #radiff -= np.cos(np.array(finalgaia['DEJ2000'])*u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
+                    # radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
+                    radiff = np.cos(finalscat['DELTA_J2000'] * u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
+                    radiff -= np.cos(np.array(finalgaia['DEJ2000']) * u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
 
                     d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
                     results = pd.DataFrame(data=d)
@@ -289,7 +289,7 @@ if __name__ == '__main__':
     make_plot = True
 
     # workdir = '/ssd/splus/iDR4_astrometry/'
-    workdir = '/storage/splus/splusDR4_psf-gaiaDR3-astrometry/'
+    workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry-cos/'
 
     if get_gaia:
         # initialize the class
@@ -355,8 +355,8 @@ if __name__ == '__main__':
     if make_plot:
         # to run only after finished all stacking
         # datatab = workdir + 'results/results_stacked.csv'
-        workdir = '/storage2/share/splusDR4_auto-gaiaDR3-astrometry'
-        datatab = os.path.join(workdir, 'splusDR4_auto-gaiaDR3-astrometry_results_stacked.csv')
+        # workdir = '/storage2/share/splusDR4_auto-gaiaDR3-astrometry-cos'
+        datatab = os.path.join(workdir, 'splusDR4_auto-gaiaDR3-astrometry-cos_results_stacked.csv')
         if not os.path.isfile(datatab):
             list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
             new_tab = pd.read_csv(list_results[0])
@@ -368,4 +368,4 @@ if __name__ == '__main__':
             new_tab.to_csv(datatab, index=False)
 
         print('running plot module for table', datatab)
-        plot_diffs(datatab, contour=True, colours=['limegreen', 'deeppink', 'c'])
+        plot_diffs(datatab, contour=True, colours=['limegreen', 'yellowgreen', 'c'])
