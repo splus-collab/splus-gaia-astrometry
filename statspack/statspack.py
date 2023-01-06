@@ -90,7 +90,8 @@ def density_contour(xdata, ydata, binsx, binsy, ax = None, range = None,
 
     return out
 
-def contour_pdf(x_axis, y_axis, ax=None, nbins=10, percent=10, colors='b'):
+
+def contour_pdf(x_axis, y_axis, ax=None, nbins=10, percent: list=10, colors='b'):
     '''
         contornos para percentis tirei deste site:
         http://stackoverflow.com/questions/12301071/multidimensional-confidence-intervals
@@ -101,19 +102,26 @@ def contour_pdf(x_axis, y_axis, ax=None, nbins=10, percent=10, colors='b'):
     ymin = min(y_axis)
     ymax = max(y_axis)
     xf = np.transpose(x1)
+    print('calculating pdf...')
     pdf = scipy.stats.kde.gaussian_kde(xf.T)
     q, w = np.meshgrid(np.linspace(xmin, xmax, nbins),
                        np.linspace(ymin, ymax, nbins))
     r = pdf([q.flatten(), w.flatten()])
-    s = scipy.stats.scoreatpercentile(pdf(pdf.resample(1000)), percent)
-    r.shape = (nbins, nbins)
-    if ax is None:
-        contour = plt.contour(np.linspace(xmin, xmax, nbins),
-                              np.linspace(ymin, ymax, nbins),
-                              r, [s], linewidths=1.5, colors=colors)
-    else:
-        contour = ax.contour(np.linspace(xmin, xmax, nbins),
-                             np.linspace(ymin, ymax, nbins),
-                             r, [s], linewidths=1.5, colors=colors)
+    if len(list(percent)) != len(list(colors)):
+        print('number of percentiles differs from number of colours. Setting colors to None')
+        colors = [None] * len(list(percent))
+    for perc, colour in zip(list(percent), list(colors)):
+        print('calculating score for percentile', perc)
+        s = scipy.stats.scoreatpercentile(pdf(pdf.resample(1000)), perc)
+        r.shape = (nbins, nbins)
+        print('creating contour for percentile', perc)
+        if ax is None:
+            contour = plt.contour(np.linspace(xmin, xmax, nbins),
+                                  np.linspace(ymin, ymax, nbins),
+                                  r, [s], linewidths=1.5, colors=colour)
+        else:
+            contour = ax.contour(np.linspace(xmin, xmax, nbins),
+                                 np.linspace(ymin, ymax, nbins),
+                                 r, [s], linewidths=1.5, colors=colour)
 
     return contour
