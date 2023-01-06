@@ -17,7 +17,6 @@ import multiprocessing
 import sys
 import time
 import glob
-import os
 path_root = os.getcwd()
 sys.path.append(str(path_root) + '/splus-gaia-astrometry')
 from statspack.statspack import contour_pdf
@@ -54,7 +53,7 @@ class SplusGaiaAst(object):
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
         v.ROW_LIMIT = 999999999
         # change cache location
-        cache_path = workdir + '.astropy/cache/astroquery/Vizier/'
+        cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
         if not os.path.isdir(cache_path):
             os.makedirs(cache_path, exist_ok=True)
         v.cache_location = cache_path
@@ -161,19 +160,24 @@ class SplusGaiaAst(object):
         return
 
 
-def plot_diffs(datatab, contour=False):
+def plot_diffs(datatab, contour=False, colours=None):
     """plot results"""
 
     data = pd.read_csv(datatab)
-    radiff = data['radiff']
-    dediff = data['dediff']
-    abspm = data['abspm']
+    mask = (data['radiff'] > -10) & (data['radiff'] < 10)
+    mask &= (data['dediff'] > -10) & (data['dediff'] < 10)
+
+    radiff = data['radiff'][mask]
+    dediff = data['dediff'][mask]
+    abspm = data['abspm'][mask]
 
     # stats
     # mra = np.median(radiff)
     percra = np.percentile(radiff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
+    print('percentiles for RA:', percra)
     # mde = np.median(dediff)
     percde = np.percentile(dediff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
+    print('percentiles for DEC:', percde)
 
     # definitions for the axes
     left, width = 0.1, 0.6
@@ -196,14 +200,17 @@ def plot_diffs(datatab, contour=False):
 
     # the scatter plot:
     lbl = r'$N = %i$' % len(radiff)
+    print('starting plot...')
     sc = ax_scatter.scatter(radiff, dediff, c=abspm, s=10, cmap='plasma', label=lbl)
+    print('finished plot...')
     ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
                       fontsize=12)
     if contour:
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=0.3, colors='limegreen')
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=4.55, colors='deeppink')
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=31.7, colors='c')
+        print('calculating contours...')
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=[0.3, 4.55, 31.7],
+                    colors=colours)
+        print('Done!')
 
     cb = plt.colorbar(sc, ax=ax_histy, pad=.02)
     cb.set_label(r'$|\mu|\ \mathrm{[mas\,yr^{-1}]}$', fontsize=20)
@@ -219,6 +226,7 @@ def plot_diffs(datatab, contour=False):
     plt.setp(ax_scatter.get_yticklabels(), fontsize=14)
 
     # plot stats
+    print('plotting histograms percentiles...')
     ax_histx.axvline(percra[0], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[1], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[2], color='k', linestyle='dashed', lw=1, zorder=1)
@@ -235,11 +243,16 @@ def plot_diffs(datatab, contour=False):
     ax_histy.axhline(percde[6], color='k', linestyle='dashed', lw=1, zorder=1)
 
     # build hists
-    bins = np.arange(-lim, lim + binwidth, binwidth)
+    print('building histograms...')
+    if radiff.size < 1000000:
+        bins = np.arange(-lim, lim + binwidth, binwidth)
+    else:
+        bins = 1000
     # xlbl = r'$\overline{\Delta\alpha} = %.3f$' % percra[3].value
     xlbl = r'$\widetilde{\Delta\alpha} = %.3f$' % percra[3]
     xlbl += '\n'
     xlbl += r'$\sigma = %.3f$' % np.std(radiff)
+    print('build RA histogram...')
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
@@ -247,6 +260,7 @@ def plot_diffs(datatab, contour=False):
     ylbl = r'$\widetilde{\Delta\delta} = %.3f$' % percde[3]
     ylbl += '\n'
     ylbl += r'$\sigma = %.3f$' % np.std(dediff)
+    print('build DEC histogram...')
     yx, yy, _ = ax_histy.hist(dediff, bins=bins, orientation='horizontal',
                               label=ylbl, alpha=0.8, zorder=10)
     ax_histy.legend(loc='upper right', handlelength=0, fontsize=12)
@@ -261,16 +275,19 @@ def plot_diffs(datatab, contour=False):
     figpath = datatab.split('.')[0] + '.png'
     print('saving fig', figpath)
     plt.savefig(figpath, format='png', dpi=360)
-    plt.show()
+    showfig = False
+    if showfig:
+        plt.show()
+    else:
+        plt.close()
 
     return
 
 
 if __name__ == '__main__':
-    get_gaia = True
-    make_plot = False
+    get_gaia = False
+    make_plot = True
 
-    # workdir = '/ssd/splus/MAR-gaia-astrometry/'
     # workdir = '/ssd/splus/iDR4_astrometry/'
     workdir = '/storage/splus/splusDR4_psf-gaiaDR3-astrometry/'
 
@@ -337,14 +354,18 @@ if __name__ == '__main__':
 
     if make_plot:
         # to run only after finished all stacking
-        datatab = workdir + 'results/results_stacked.csv'
+        # datatab = workdir + 'results/results_stacked.csv'
+        workdir = '/storage2/share/splusDR4_auto-gaiaDR3-astrometry'
+        datatab = os.path.join(workdir, 'splusDR4_auto-gaiaDR3-astrometry_results_stacked.csv')
         if not os.path.isfile(datatab):
             list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
             new_tab = pd.read_csv(list_results[0])
             for tab in list_results[1:]:
+                print('stacking tab', tab, '...')
                 t = pd.read_csv(tab)
                 new_tab = pd.concat([new_tab, t], axis=0)
             print('saving results to', datatab)
             new_tab.to_csv(datatab, index=False)
 
-        plot_diffs(datatab, contour=False)
+        print('running plot module for table', datatab)
+        plot_diffs(datatab, contour=True, colours=['limegreen', 'deeppink', 'c'])
