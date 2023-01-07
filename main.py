@@ -149,8 +149,10 @@ class SplusGaiaAst(object):
                     dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
                     # calculate splus - gaia ra
                     # radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
-                    radiff = np.cos(finalscat['DELTA_J2000'] * u.deg)[mask] * finalscat['ALPHA_J2000'][mask] * 3600.
-                    radiff -= np.cos(np.array(finalgaia['DEJ2000']) * u.deg)[mask] * np.array(finalgaia['RAJ2000'][mask]) * 3600.
+                    radiff = (np.cos(np.aray(finalscat[self.decolumn]) * u.deg)[mask] *
+                              finalscat[self.racolumn][mask] -
+                              np.cos(np.array(finalgaia['DEJ2000']) * u.deg)[mask] *
+                              np.array(finalgaia['RAJ2000'][mask])) * 3600.
 
                     d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
                     results = pd.DataFrame(data=d)
@@ -285,8 +287,8 @@ def plot_diffs(datatab, contour=False, colours=None):
 
 
 if __name__ == '__main__':
-    get_gaia = False
-    make_plot = True
+    get_gaia = True
+    make_plot = False
 
     # workdir = '/ssd/splus/iDR4_astrometry/'
     workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry-cos/'
@@ -297,13 +299,13 @@ if __name__ == '__main__':
 
         # define default paths and additives
         gasp.workdir = workdir
-        gasp.racolumn = 'RA_r'
-        gasp.decolumn = 'DEC_r'
+        gasp.racolumn = 'RA'
+        gasp.decolumn = 'DEC'
         gasp.cat_name_preffix = 'splus_cats/'
-        gasp.cat_name_suffix = '_R_psf.fits'
-        gasp.mag_column = 'r_psf'
-        gasp.flags_column = None
-        gasp.clstar_column = 'CLASS_STAR_r'
+        gasp.cat_name_suffix = '_R_auto.fits'
+        gasp.mag_column = 'r_auto'
+        gasp.flags_column = 'SEX_FLAGS_r'
+        # gasp.clstar_column = 'CLASS_STAR_r'
 
         # read footprint table
         footprint = ascii.read(workdir + 'tiles_new_status.csv')
