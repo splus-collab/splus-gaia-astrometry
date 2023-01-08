@@ -1,5 +1,6 @@
 # This module is meant to calculate the differences between the astrometry from S-PLUS to that
 # of Gaia DR2 or DR3
+# 2022-01-08: Expanding to compare any given photometric catalogue with Gaia
 # Herpich F. R. 2022-12-20 fabiorafaelh@gmail.com
 # GitHub: herpichfr
 # ORCID: 0000-0001-7907-7884
@@ -22,10 +23,15 @@ sys.path.append(str(path_root) + '/splus-gaia-astrometry')
 from statspack.statspack import contour_pdf
 
 class SplusGaiaAst(object):
-    """Class to calculate differences between the astrometry and SPLUS"""
+    """
+    Find astrometry differences between any observation and Gaia's.
+    Gaia DR2 and DR3 are implemented
+    """
+
     def __init__(self):
         self.workdir: str = './'
-        self.gaia_dr: str = 'DR3'
+        # Gaia DR2 = 345; Gaia DR3 = 355
+        self.gaia_dr: str = '355'
         self.cat_name_preffix: str = ''
         self.cat_name_suffix: str = ''
         self.cathdu: int = 1
@@ -35,34 +41,52 @@ class SplusGaiaAst(object):
         self.flags_column: str = 'FLAGS'
         self.clstar_column = None
         self.filetype = '.fits'
+        self.angle = 1.0
 
-    def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None):
-        """query gaia DR3 for photometry products"""
+    def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
+        """
+        Query Gaia photometry available at Vizier around a given centre.
 
-        print('querying gaia/vizier')
+        tile_coords : SkyCoord object
+          Central coordinates of the catalogue
+
+        tilename : string
+          Name of the central tile to use to search for the individual catalogues
+
+        workdir : string
+          Workdir path. Default is None
+
+        gaia_dr : str | float
+          Gaia's catalogue number as registered at Vizier
+
+        angle : float
+          Radius to search around the central coordinates through Gaia's catalogue in Vizier
+
+        :returns: DataFrame containing the data queried around the given coordinates
+        :rtype: Pandas DataFrame containing the data queried around the given coordinates
+        """
+
         workdir = self.workdir if workdir is None else workdir
         gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
+        angle = self.angle if angle is None else angle
 
-        if gaia_dr == 'DR2':
-            catalognumb = '345'
-        elif gaia_dr == 'DR3':
-            catalognumb = '355'
-        else:
-            raise IOError('Check Gaia DR number via vizier page')
-
-        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/'+catalognumb)
+        # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
+        print('querying gaia/vizier')
+        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/' + str(gaia_dr))
         v.ROW_LIMIT = 999999999
-        # change cache location
+        # change cache location to workdir path to avoid $HOME overfill
         cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
         if not os.path.isdir(cache_path):
             os.makedirs(cache_path, exist_ok=True)
         v.cache_location = cache_path
-        gaia_data = v.query_region(tile_coords, radius=Angle(1.0, "deg"))[0]
+        gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
+        # mask all nan objects in the coordinates columns before saving the catalogue
         mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
         gaia_data = gaia_data[~mask]
         print('gaia_data is', gaia_data)
 
-        gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv'
+        # save Gaia's catalogue to workdir
+        gaia_cat_path = os.path.join(workdir, 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv')
         if not os.path.isdir(workdir + 'gaia_' + gaia_dr):
             os.mkdir(workdir + 'gaia_' + gaia_dr)
 
@@ -149,10 +173,12 @@ class SplusGaiaAst(object):
                     dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
                     # calculate splus - gaia ra
                     # radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
-                    radiff = (np.cos(np.aray(finalscat[self.decolumn]) * u.deg)[mask] *
-                              finalscat[self.racolumn][mask] -
-                              np.cos(np.array(finalgaia['DEJ2000']) * u.deg)[mask] *
-                              np.array(finalgaia['RAJ2000'][mask])) * 3600.
+                    # radiff = (np.cos(np.aray(finalscat[self.decolumn]) * u.deg)[mask] *
+                    #           finalscat[self.racolumn][mask] -
+                    #           np.cos(np.array(finalgaia['DEJ2000']) * u.deg)[mask] *
+                    #           np.array(finalgaia['RAJ2000'][mask])) * 3600.
+                    radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000']) *\
+                             np.cos(np.array(finalgaia['DEJ2000'])[mask] * u.deg)
 
                     d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
                     results = pd.DataFrame(data=d)
