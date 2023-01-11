@@ -31,17 +31,20 @@ class SplusGaiaAst(object):
     def __init__(self):
         self.workdir: str = './'
         # Gaia DR2 = 345; Gaia DR3 = 355
-        self.gaia_dr: str = '355'
+        self.gaia_dr = '355'
         self.cat_name_preffix: str = ''
         self.cat_name_suffix: str = ''
         self.cathdu: int = 1
         self.racolumn: str = 'RA'
         self.decolumn: str = 'DEC'
         self.mag_column: str = 'MAG_AUTO'
-        self.flags_column: str = 'FLAGS'
+        self.flags_column = None
         self.clstar_column = None
+        self.fwhm_column = None
+        self.sn_column = None
         self.filetype = '.fits'
-        self.angle = 1.0
+        self.angle: float = 1.0
+        self.sn_limit: float = 10.
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
@@ -77,7 +80,10 @@ class SplusGaiaAst(object):
         # change cache location to workdir path to avoid $HOME overfill
         cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
         if not os.path.isdir(cache_path):
-            os.makedirs(cache_path, exist_ok=True)
+            try:
+                os.makedirs(cache_path, exist_ok=True)
+            except FileExistsError:
+                print('File', cache_path, 'already exists. Skipping')
         v.cache_location = cache_path
         gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
         # mask all nan objects in the coordinates columns before saving the catalogue
@@ -88,7 +94,10 @@ class SplusGaiaAst(object):
         # save Gaia's catalogue to workdir
         gaia_cat_path = os.path.join(workdir, 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv')
         if not os.path.isdir(workdir + 'gaia_' + gaia_dr):
-            os.mkdir(workdir + 'gaia_' + gaia_dr)
+            try:
+                os.mkdir(workdir + 'gaia_' + gaia_dr)
+            except FileExistsError:
+                print('File', workdir + 'gaia_' + gaia_dr, 'already exists. Skipping')
 
         print('saving result of match with gaia to', gaia_cat_path)
         gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
@@ -148,7 +157,7 @@ class SplusGaiaAst(object):
                     idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
                     separation = d2d < 5.0 * u.arcsec
 
-                    sample = (scat[self.mag_column] > 13) & (scat[self.mag_column] < 19)
+                    sample = (scat[self.mag_column] > 14.) & (scat[self.mag_column] < 19.)
                     if self.flags_column is None:
                         print('FLAGS column not available. Skipping using flags to select objects')
                     else:
@@ -160,6 +169,14 @@ class SplusGaiaAst(object):
                             sample &= scat[self.clstar_column] > 0.95 # MAR cat nao tem CLASS_STAR
                         finally:
                             Warning('Column for CLASS_STAR not found. Ignoring')
+                    if self.fwhm_column is None:
+                        print('Not considering FWHM as an option to select objects')
+                    else:
+                        sample &= scat[self.fwhm_column] * 3600 < 2.5
+                    if self.sn_column is None:
+                        print('Not considering SN as an option to select objects')
+                    else:
+                        sample &= scat[self.sn_column] > self.sn_limit
 
                     finalscat = scat[separation & sample]
                     finalgaia = gaia_data[idx][separation & sample]
@@ -172,15 +189,16 @@ class SplusGaiaAst(object):
                     # calculate splus - gaia declination
                     dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
                     # calculate splus - gaia ra
-                    # radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) * 3600.
-                    # radiff = (np.cos(np.aray(finalscat[self.decolumn]) * u.deg)[mask] *
-                    #           finalscat[self.racolumn][mask] -
-                    #           np.cos(np.array(finalgaia['DEJ2000']) * u.deg)[mask] *
-                    #           np.array(finalgaia['RAJ2000'][mask])) * 3600.
-                    radiff = (finalscat[self.racolumn][mask] - finalgaia['RAJ2000']) *\
+                    radiff = 3600 * (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) *\
                              np.cos(np.array(finalgaia['DEJ2000'])[mask] * u.deg)
 
-                    d = {'radiff': radiff, 'dediff': dediff, 'abspm': abspm[mask]}
+                    d = {'RA': finalscat[self.racolumn][mask],
+                         'DEC': finalscat[self.decolumn][mask],
+                         'RAJ2000': finalgaia['RAJ2000'][mask],
+                         'DEJ2000': finalgaia['DEJ2000'][mask],
+                         'radiff': radiff,
+                         'dediff': dediff,
+                         'abspm': abspm[mask]}
                     results = pd.DataFrame(data=d)
                     print('saving results to', path_to_results)
                     results.to_csv(path_to_results, index=False)
@@ -188,7 +206,7 @@ class SplusGaiaAst(object):
         return
 
 
-def plot_diffs(datatab, contour=False, colours=None):
+def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     """plot results"""
 
     data = pd.read_csv(datatab)
@@ -300,10 +318,11 @@ def plot_diffs(datatab, contour=False, colours=None):
     ax_scatter.set_xlabel(r'$\mathrm{\Delta\alpha\ [arcsec]}$', fontsize=20)
     ax_scatter.set_ylabel(r'$\mathrm{\Delta\delta\ [arcsec]}$', fontsize=20)
 
-    figpath = datatab.split('.')[0] + '.png'
-    print('saving fig', figpath)
-    plt.savefig(figpath, format='png', dpi=360)
-    showfig = False
+    if savefig:
+        figpath = datatab.split('.')[0] + '.png'
+        print('saving fig', figpath)
+        plt.savefig(figpath, format='png', dpi=360)
+    showfig = True
     if showfig:
         plt.show()
     else:
@@ -314,10 +333,10 @@ def plot_diffs(datatab, contour=False, colours=None):
 
 if __name__ == '__main__':
     get_gaia = True
-    make_plot = False
+    make_plot = True
 
-    # workdir = '/ssd/splus/iDR4_astrometry/'
-    workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry-cos/'
+    workdir = '/ssd/splus/jype-gaia-astrometry/'
+    # workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry-cos/'
 
     if get_gaia:
         # initialize the class
@@ -325,21 +344,25 @@ if __name__ == '__main__':
 
         # define default paths and additives
         gasp.workdir = workdir
-        gasp.racolumn = 'RA'
-        gasp.decolumn = 'DEC'
+        gasp.racolumn = 'RA_r'
+        gasp.decolumn = 'DEC_r'
         gasp.cat_name_preffix = 'splus_cats/'
-        gasp.cat_name_suffix = '_R_auto.fits'
-        gasp.mag_column = 'r_auto'
-        gasp.flags_column = 'SEX_FLAGS_r'
-        # gasp.clstar_column = 'CLASS_STAR_r'
+        gasp.cat_name_suffix = '_R_psf.fits'
+        gasp.mag_column = 'r_psf'
+        # gasp.flags_column = 'FLAGS'
+        # gasp.clstar_column = 'CLASS_STAR'
+        gasp.sn_column = 's2n_r_psf'
+        gasp.sn_limit = 20.
+        # gasp.fwhm_column = 'FWHM_R'
+        # gasp.cathdu = 2
 
         # read footprint table
         footprint = ascii.read(workdir + 'tiles_new_status.csv')
         # read list of fields to process
-        fields = pd.read_csv(workdir + 'dr4_fields.csv')
+        fields = pd.read_csv(workdir + 'jype_fields.csv')
 
         # calculate to all tiles at once
-        num_procs = 12
+        num_procs = 8
         b = list(fields['NAME'])
         num_fields = np.unique(b).size
         if num_fields % num_procs > 0:
@@ -383,8 +406,7 @@ if __name__ == '__main__':
     if make_plot:
         # to run only after finished all stacking
         # datatab = workdir + 'results/results_stacked.csv'
-        # workdir = '/storage2/share/splusDR4_auto-gaiaDR3-astrometry-cos'
-        datatab = os.path.join(workdir, 'splusDR4_auto-gaiaDR3-astrometry-cos_results_stacked.csv')
+        datatab = os.path.join(workdir, 'jype_psf-gaiaDR3-astrometry_results_stacked.csv')
         if not os.path.isfile(datatab):
             list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
             new_tab = pd.read_csv(list_results[0])
@@ -396,4 +418,4 @@ if __name__ == '__main__':
             new_tab.to_csv(datatab, index=False)
 
         print('running plot module for table', datatab)
-        plot_diffs(datatab, contour=True, colours=['limegreen', 'yellowgreen', 'c'])
+        plot_diffs(datatab, contour=False, colours=['limegreen', 'yellowgreen', 'c'], savefig=True)
