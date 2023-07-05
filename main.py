@@ -4,7 +4,15 @@
 # Herpich F. R. 2022-12-20 fabiorafaelh@gmail.com
 # GitHub: herpichfr
 # ORCID: 0000-0001-7907-7884
+# ---
+# 2023-01-12: Adding multiprocessing to speed up the process
+# 2023-01-13: Adding a function to calculate the astrometric differences between any SPLUS catalogue as long as the
+# columns are properly named
+# ---
+# 2023-07-04: Changing parameters to run MAR columns
+#
 
+from statspack.statspack import contour_pdf
 import os
 import numpy as np
 from astropy.io import ascii, fits
@@ -20,7 +28,7 @@ import time
 import glob
 path_root = os.getcwd()
 sys.path.append(str(path_root) + '/splus-gaia-astrometry')
-from statspack.statspack import contour_pdf
+
 
 class SplusGaiaAst(object):
     """
@@ -75,7 +83,8 @@ class SplusGaiaAst(object):
 
         # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
         print('querying gaia/vizier')
-        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'], catalog='I/' + str(gaia_dr))
+        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
+                   catalog='I/' + str(gaia_dr))
         v.ROW_LIMIT = 999999999
         # change cache location to workdir path to avoid $HOME overfill
         cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
@@ -92,12 +101,14 @@ class SplusGaiaAst(object):
         print('gaia_data is', gaia_data)
 
         # save Gaia's catalogue to workdir
-        gaia_cat_path = os.path.join(workdir, 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv')
+        gaia_cat_path = os.path.join(
+            workdir, 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv')
         if not os.path.isdir(workdir + 'gaia_' + gaia_dr):
             try:
                 os.mkdir(workdir + 'gaia_' + gaia_dr)
             except FileExistsError:
-                print('File', workdir + 'gaia_' + gaia_dr, 'already exists. Skipping')
+                print('File', workdir + 'gaia_' +
+                      gaia_dr, 'already exists. Skipping')
 
         print('saving result of match with gaia to', gaia_cat_path)
         gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
@@ -115,7 +126,9 @@ class SplusGaiaAst(object):
         cat_name_preffix = self.cat_name_preffix if cat_name_preffix is None else cat_name_preffix
         cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
 
-        field_names = np.array([n.replace('_', '-') for n in footprint['NAME']])
+        # field_names = np.array([n.replace('_', '-')
+        #                        for n in footprint['NAME']])
+        field_names = np.array([n for n in footprint['NAME']])
         results_dir = workdir + 'results/'
         if not os.path.isdir(results_dir):
             os.mkdir(results_dir)
@@ -124,13 +137,15 @@ class SplusGaiaAst(object):
             if tile == 'fakename':
                 print('this is a filler name')
             else:
-                path_to_results = results_dir + tile + '_splus-gaiaDR3_diff.csv'
+                path_to_results = results_dir + tile + '_mar-gaiaDR3_diff.csv'
                 if os.path.isfile(path_to_results):
-                    print('catalogue for tile', tile, 'already exists. Skipping')
+                    print('catalogue for tile', tile,
+                          'already exists. Skipping')
                 else:
                     sra = footprint['RA'][field_names == tile]
                     sdec = footprint['DEC'][field_names == tile]
-                    tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(u.hour, u.deg), frame='icrs', equinox='J2000')
+                    tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
+                        u.hour, u.deg), frame='icrs', equinox='J2000')
 
                     gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
                     if os.path.isfile(gaia_cat_path):
@@ -141,32 +156,44 @@ class SplusGaiaAst(object):
 
                     if self.filetype == '.fits':
                         try:
-                            scat = fits.open(workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
+                            scat = fits.open(
+                                workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
                         except TypeError:
-                            print('catalogue is not in fits format. Define the proper format of the default variable filetype')
+                            print(
+                                'catalogue is not in fits format. Define the proper format of the default variable filetype')
                     elif self.filetype == '.csv':
                         try:
-                            scat = pd.read_csv(workdir + cat_name_preffix + tile + cat_name_suffix)
+                            scat = pd.read_csv(
+                                workdir + cat_name_preffix + tile + cat_name_suffix)
                         except TypeError:
-                            print('catalogue is not in csv format. Define the proper format of the default variable filetype')
+                            print(
+                                'catalogue is not in csv format. Define the proper format of the default variable filetype')
                     else:
-                        raise TypeError('filetype for input catalogue not supported. Use .fits or .csv')
+                        raise TypeError(
+                            'filetype for input catalogue not supported. Use .fits or .csv')
 
-                    splus_coords = SkyCoord(ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
-                    gaia_coords = SkyCoord(ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
-                    idx, d2d, d3d = splus_coords.match_to_catalog_3d(gaia_coords)
+                    splus_coords = SkyCoord(
+                        ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
+                    gaia_coords = SkyCoord(
+                        ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
+                    idx, d2d, d3d = splus_coords.match_to_catalog_3d(
+                        gaia_coords)
                     separation = d2d < 5.0 * u.arcsec
 
-                    sample = (scat[self.mag_column] > 14.) & (scat[self.mag_column] < 19.)
+                    sample = (scat[self.mag_column] > 14.) & (
+                        scat[self.mag_column] < 19.)
                     if self.flags_column is None:
-                        print('FLAGS column not available. Skipping using flags to select objects')
+                        print(
+                            'FLAGS column not available. Skipping using flags to select objects')
                     else:
                         sample &= scat[self.flags_column] == 0
                     if self.clstar_column is None:
-                        print('Not considering CLASS_STAR as an option to select objects')
+                        print(
+                            'Not considering CLASS_STAR as an option to select objects')
                     else:
                         try:
-                            sample &= scat[self.clstar_column] > 0.95 # MAR cat nao tem CLASS_STAR
+                            # MAR cat nao tem CLASS_STAR
+                            sample &= scat[self.clstar_column] > 0.95
                         finally:
                             Warning('Column for CLASS_STAR not found. Ignoring')
                     if self.fwhm_column is None:
@@ -187,10 +214,12 @@ class SplusGaiaAst(object):
                     lmt = np.percentile(abspm[~mx.mask], 95)
                     mask = (abspm < lmt) & ~mx.mask
                     # calculate splus - gaia declination
-                    dediff = 3600. * (finalscat[self.decolumn][mask]*u.deg - np.array(finalgaia['DEJ2000'])[mask]*u.deg)
+                    dediff = 3600. * \
+                        (finalscat[self.decolumn][mask]*u.deg -
+                         np.array(finalgaia['DEJ2000'])[mask]*u.deg)
                     # calculate splus - gaia ra
                     radiff = 3600 * (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) *\
-                             np.cos(np.array(finalgaia['DEJ2000'])[mask] * u.deg)
+                        np.cos(np.array(finalgaia['DEJ2000'])[mask] * u.deg)
 
                     d = {'RA': finalscat[self.racolumn][mask],
                          'DEC': finalscat[self.decolumn][mask],
@@ -247,7 +276,8 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     # the scatter plot:
     lbl = r'$N = %i$' % len(radiff)
     print('starting plot...')
-    sc = ax_scatter.scatter(radiff, dediff, c=abspm, s=10, cmap='plasma', label=lbl)
+    sc = ax_scatter.scatter(radiff, dediff, c=abspm,
+                            s=10, cmap='plasma', label=lbl)
     print('finished plot...')
     ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
@@ -335,7 +365,8 @@ if __name__ == '__main__':
     get_gaia = True
     make_plot = True
 
-    workdir = '/ssd/splus/jype-gaia-astrometry/'
+    # calculate astrometric precision for MAR catalogues
+    workdir = '/ssd/splus/astrocatalogs/'
     # workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry-cos/'
 
     if get_gaia:
@@ -344,22 +375,22 @@ if __name__ == '__main__':
 
         # define default paths and additives
         gasp.workdir = workdir
-        gasp.racolumn = 'RA_r'
-        gasp.decolumn = 'DEC_r'
-        gasp.cat_name_preffix = 'splus_cats/'
-        gasp.cat_name_suffix = '_R_psf.fits'
-        gasp.mag_column = 'r_psf'
-        # gasp.flags_column = 'FLAGS'
+        gasp.racolumn = 'ALPHA_J2000'
+        gasp.decolumn = 'DELTA_J2000'
+        gasp.cat_name_preffix = 'mar_cats/'
+        gasp.cat_name_suffix = '.cat'
+        gasp.mag_column = 'MAG_AUTO'
+        gasp.flags_column = 'FLAGS'
         # gasp.clstar_column = 'CLASS_STAR'
-        gasp.sn_column = 's2n_r_psf'
-        gasp.sn_limit = 20.
+        # gasp.sn_column = 's2n_r_psf'
+        # gasp.sn_limit = 20.
         # gasp.fwhm_column = 'FWHM_R'
-        # gasp.cathdu = 2
+        gasp.cathdu = 2
 
         # read footprint table
         footprint = ascii.read(workdir + 'tiles_new_status.csv')
         # read list of fields to process
-        fields = pd.read_csv(workdir + 'jype_fields.csv')
+        fields = pd.read_csv(workdir + 'mar_fields.csv')
 
         # calculate to all tiles at once
         num_procs = 8
@@ -374,12 +405,14 @@ if __name__ == '__main__':
                 i += 1
             else:
                 print(num_fields, 'already fulfill the conditions')
-        tiles = np.array(b).reshape((num_procs, int(np.array(b).size / num_procs)))
+        tiles = np.array(b).reshape(
+            (num_procs, int(np.array(b).size / num_procs)))
         print('calculating for a total of', tiles.size, 'fields')
         jobs = []
         print('creating', num_procs, 'jobs...')
         for tile in tiles:
-            process = multiprocessing.Process(target=gasp.calculate_astdiff, args=(tile, footprint))
+            process = multiprocessing.Process(
+                target=gasp.calculate_astdiff, args=(tile, footprint))
             jobs.append(process)
 
         # calculate_astdiff(fields, footprint, workdir, gaia_dr,
@@ -406,9 +439,11 @@ if __name__ == '__main__':
     if make_plot:
         # to run only after finished all stacking
         # datatab = workdir + 'results/results_stacked.csv'
-        datatab = os.path.join(workdir, 'jype_psf-gaiaDR3-astrometry_results_stacked.csv')
+        datatab = os.path.join(
+            workdir, 'mar-astrometry_results_stacked.csv')
         if not os.path.isfile(datatab):
-            list_results = glob.glob(workdir + 'results/*_splus-gaiaDR3_diff.csv')
+            list_results = glob.glob(
+                workdir + 'results/*_mar-gaiaDR3_diff.csv')
             new_tab = pd.read_csv(list_results[0])
             for tab in list_results[1:]:
                 print('stacking tab', tab, '...')
@@ -418,4 +453,5 @@ if __name__ == '__main__':
             new_tab.to_csv(datatab, index=False)
 
         print('running plot module for table', datatab)
-        plot_diffs(datatab, contour=False, colours=['limegreen', 'yellowgreen', 'c'], savefig=True)
+        plot_diffs(datatab, contour=False, colours=[
+                   'limegreen', 'yellowgreen', 'c'], savefig=True)
