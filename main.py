@@ -415,9 +415,6 @@ if __name__ == '__main__':
                 target=gasp.calculate_astdiff, args=(tile, footprint))
             jobs.append(process)
 
-        # calculate_astdiff(fields, footprint, workdir, gaia_dr,
-        #                   cat_name_preffix=field_name_preffix, cat_name_suffix=field_name_suffix)
-
         # start jobs
         print('starting', num_procs, 'jobs!')
         for j in jobs:
