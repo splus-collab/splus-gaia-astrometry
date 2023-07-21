@@ -23,22 +23,18 @@ from astroquery.vizier import Vizier
 import pandas as pd
 import matplotlib.pyplot as plt
 import multiprocessing
-import sys
 import time
 import glob
-path_root = os.getcwd()
-sys.path.append(str(path_root) + '/splus-gaia-astrometry')
+import argparse
+import logging
+import colorlog
 
 
 class SplusGaiaAst(object):
-    """
-    Find astrometry differences between any observation and Gaia's.
-    Gaia DR2 and DR3 are implemented
-    """
 
     def __init__(self):
-        self.workdir: str = './'
-        # Gaia DR2 = 345; Gaia DR3 = 355
+        self.workdir: str = os.getcwd()
+        # Gaia DR2 =345; Gaia DR3 = 355
         self.gaia_dr = '355'
         self.cat_name_preffix: str = ''
         self.cat_name_suffix: str = ''
@@ -53,11 +49,14 @@ class SplusGaiaAst(object):
         self.filetype = '.fits'
         self.angle: float = 1.0
         self.sn_limit: float = 10.
+        self.logger = logging.getLogger(__name__)
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
         Query Gaia photometry available at Vizier around a given centre.
 
+        Parameters
+        ----------
         tile_coords : SkyCoord object
           Central coordinates of the catalogue
 
@@ -73,16 +72,17 @@ class SplusGaiaAst(object):
         angle : float
           Radius to search around the central coordinates through Gaia's catalogue in Vizier
 
-        :returns: DataFrame containing the data queried around the given coordinates
-        :rtype: Pandas DataFrame containing the data queried around the given coordinates
+        Returns
+        -------
+        gaia : Pandas DataFrame
+            DataFrame containing the data queried around the given coordinates
         """
-
         workdir = self.workdir if workdir is None else workdir
         gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
         angle = self.angle if angle is None else angle
 
         # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
-        print('querying gaia/vizier')
+        self.logger.info('Querying gaia/vizier')
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
                    catalog='I/' + str(gaia_dr))
         v.ROW_LIMIT = 999999999
@@ -92,23 +92,24 @@ class SplusGaiaAst(object):
             try:
                 os.makedirs(cache_path, exist_ok=True)
             except FileExistsError:
-                print('File', cache_path, 'already exists. Skipping')
+                self.logger.info(
+                    "File %s already exists. Skipping", cache_path)
         v.cache_location = cache_path
         gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
         # mask all nan objects in the coordinates columns before saving the catalogue
         mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
         gaia_data = gaia_data[~mask]
-        print('gaia_data is', gaia_data)
+        logger.info('Gaia_data is %s', gaia_data)
 
         # save Gaia's catalogue to workdir
-        gaia_cat_path = os.path.join(
-            workdir, 'gaia_' + gaia_dr + '/' + tilename + '_gaiacat.csv')
-        if not os.path.isdir(workdir + 'gaia_' + gaia_dr):
+        gaia_cat_path = os.path.join(workdir, "".join(
+            ['gaia_', gaia_dr, '_', tilename, '.csv']))
+        if not os.path.isdir(os.path.join(workdir, "".join(['gaia_', gaia_dr]))):
             try:
-                os.mkdir(workdir + 'gaia_' + gaia_dr)
+                os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
             except FileExistsError:
-                print('File', workdir + 'gaia_' +
-                      gaia_dr, 'already exists. Skipping')
+                self.logger.info("File %s already exists. Skipping",
+                                 os.path.join(workdir, "".join(['gaia_', gaia_dr])))
 
         print('saving result of match with gaia to', gaia_cat_path)
         gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
@@ -118,7 +119,33 @@ class SplusGaiaAst(object):
     def calculate_astdiff(self, fields, footprint, workdir=None, gaia_dr=None, cat_name_preffix=None,
                           cat_name_suffix=None):
         """
-        Calculate the astrometric differences between any SPLUS catalogue as long as the columns are properly named
+        Calculate the astrometric differences between any SPLUS catalogue as
+        long as the columns are properly named
+
+        Parameters
+        ----------
+        fields : list
+          List of the tiles to be processed
+
+        footprint : astropy Table
+            Table containing the footprint of the survey
+
+        workdir : string
+            Workdir path. Default is None
+
+        gaia_dr : str | float
+            Gaia's catalogue number as registered at Vizier
+
+        cat_name_preffix : str
+            Preffix to be added to the name of the catalogue. Default is None
+
+        cat_name_suffix : str
+            Suffix to be added to the name of the catalogue. Default is None
+
+        Returns
+        -------
+        astrometry : astropy Table
+            Table containing the astrometric differences between the SPLUS catalogues and Gaia
         """
 
         gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
@@ -126,51 +153,59 @@ class SplusGaiaAst(object):
         cat_name_preffix = self.cat_name_preffix if cat_name_preffix is None else cat_name_preffix
         cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
 
-        # field_names = np.array([n.replace('_', '-')
-        #                        for n in footprint['NAME']])
-        field_names = np.array([n for n in footprint['NAME']])
-        results_dir = workdir + 'results/'
+        try:
+            field_names = np.array([n.replace('_', '-')
+                                    for n in footprint['NAME']])
+        except ValueError:
+            field_names = footprint['NAME']
+        results_dir = os.path.join(workdir, 'results/')
         if not os.path.isdir(results_dir):
             os.mkdir(results_dir)
 
         for tile in fields:
             if tile == 'fakename':
-                print('this is a filler name')
+                self.logger.info('This is a filler name')
             else:
-                path_to_results = results_dir + tile + '_mar-gaiaDR3_diff.csv'
+                path_to_results = os.path.join(
+                    results_dir, "".join([tile, '_mar-gaiaDR3_diff.csv']))
                 if os.path.isfile(path_to_results):
-                    print('catalogue for tile', tile,
-                          'already exists. Skipping')
+                    self.logger.info(
+                        'Catalogue for tile %s already exists. Skipping' % tile)
                 else:
                     sra = footprint['RA'][field_names == tile]
                     sdec = footprint['DEC'][field_names == tile]
                     tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
                         u.hour, u.deg), frame='icrs', equinox='J2000')
 
-                    gaia_cat_path = workdir + 'gaia_' + gaia_dr + '/' + tile + '_gaiacat.csv'
+                    gaia_cat_path = os.path.join(workdir, "".join(
+                        ['gaia_', gaia_dr, '/', tile, '.csv']))
                     if os.path.isfile(gaia_cat_path):
-                        print('reading gaia cat from database')
+                        self.logger.info('Reading gaia cat from database')
                         gaia_data = ascii.read(gaia_cat_path, format='csv')
                     else:
                         gaia_data = self.get_gaia(tile_coords, tile)
 
                     if self.filetype == '.fits':
                         try:
-                            scat = fits.open(
-                                workdir + cat_name_preffix + tile + cat_name_suffix)[self.cathdu].data
+                            scat = fits.open(os.path.join(
+                                workdir, "".join([cat_name_preffix, tile, cat_name_suffix])))[self.cathdu].data
                         except TypeError:
-                            print(
-                                'catalogue is not in fits format. Define the proper format of the default variable filetype')
+                            self.logger.error(
+                                'Catalogue is not in FITS format. Define the proper format of the default variable filetype')
+                            raise TypeError('Catalogue is not in FITS format')
                     elif self.filetype == '.csv':
                         try:
-                            scat = pd.read_csv(
-                                workdir + cat_name_preffix + tile + cat_name_suffix)
+                            scat = pd.read_csv(os.path.join(workdir,
+                                               "".join([cat_name_preffix, tile, cat_name_suffix])))
                         except TypeError:
-                            print(
-                                'catalogue is not in csv format. Define the proper format of the default variable filetype')
+                            self.logger.error(
+                                'Catalogue is not in CSV format. Define the proper format of the default variable filetype')
+                            raise TypeError('Catalogue is not in CSV format')
                     else:
+                        self.logger.error(
+                            'Filetype for input catalogue not supported. Use FITS or CSV')
                         raise TypeError(
-                            'filetype for input catalogue not supported. Use .fits or .csv')
+                            'Filetype for input catalogue not supported')
 
                     splus_coords = SkyCoord(
                         ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
@@ -180,28 +215,30 @@ class SplusGaiaAst(object):
                         gaia_coords)
                     separation = d2d < 5.0 * u.arcsec
 
-                    sample = (scat[self.mag_column] > 14.) & (
-                        scat[self.mag_column] < 19.)
+                    sample = (scat[self.mag_column] > 14.)
+                    sample &= (scat[self.mag_column] < 19.)
                     if self.flags_column is None:
-                        print(
-                            'FLAGS column not available. Skipping using flags to select objects')
+                        self.logger.warning(
+                            'FLAGS column not available. Skipping using flags to object selection')
                     else:
                         sample &= scat[self.flags_column] == 0
                     if self.clstar_column is None:
-                        print(
-                            'Not considering CLASS_STAR as an option to select objects')
+                        self.logger.warning(
+                            'CLASS_STAR column not available. Skipping using CLASS_STAR to object selection')
                     else:
                         try:
-                            # MAR cat nao tem CLASS_STAR
                             sample &= scat[self.clstar_column] > 0.95
                         finally:
-                            Warning('Column for CLASS_STAR not found. Ignoring')
+                            self.logger.warning(
+                                'Column for CLASS_STAR not found. Ignoring')
                     if self.fwhm_column is None:
-                        print('Not considering FWHM as an option to select objects')
+                        self.logger.warning(
+                            'FWHM column not available. Skipping using FWHM to object selection')
                     else:
                         sample &= scat[self.fwhm_column] * 3600 < 2.5
                     if self.sn_column is None:
-                        print('Not considering SN as an option to select objects')
+                        self.logger.warning(
+                            'SN column not available. Skipping using SN to object selection')
                     else:
                         sample &= scat[self.sn_column] > self.sn_limit
 
@@ -213,7 +250,6 @@ class SplusGaiaAst(object):
                     mx = np.ma.masked_invalid(abspm)
                     lmt = np.percentile(abspm[~mx.mask], 95)
                     mask = (abspm < lmt) & ~mx.mask
-                    # calculate splus - gaia declination
                     dediff = 3600. * \
                         (finalscat[self.decolumn][mask]*u.deg -
                          np.array(finalgaia['DEJ2000'])[mask]*u.deg)
@@ -229,6 +265,7 @@ class SplusGaiaAst(object):
                          'dediff': dediff,
                          'abspm': abspm[mask]}
                     results = pd.DataFrame(data=d)
+                    self.logger.info('saving results to %s' % path_to_results)
                     print('saving results to', path_to_results)
                     results.to_csv(path_to_results, index=False)
 
@@ -236,7 +273,23 @@ class SplusGaiaAst(object):
 
 
 def plot_diffs(datatab, contour=False, colours=None, savefig=False):
-    """plot results"""
+    """
+    Plots the differences between S-PLUS and Gaia.
+
+    Parameters
+    ----------
+    datatab : str
+        Path to the table with the differences.
+    contour : bool, optional
+        If True, plots the contours of the distribution.
+    colours : str, optional
+        Path to the file with the colours.
+    savefig : bool, optional
+        If True, saves the figure.
+    """
+
+    call_logger()
+    logger = logging.getLogger(__name__)
 
     data = pd.read_csv(datatab)
     mask = (data['radiff'] > -10) & (data['radiff'] < 10)
@@ -246,15 +299,11 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     dediff = data['dediff'][mask]
     abspm = data['abspm'][mask]
 
-    # stats
-    # mra = np.median(radiff)
     percra = np.percentile(radiff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
-    print('percentiles for RA:', percra)
-    # mde = np.median(dediff)
+    logger.info('Percentiles for RA: %s' % percra)
     percde = np.percentile(dediff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
-    print('percentiles for DEC:', percde)
+    logger.info('Percentiles for DEC: %s' % percde)
 
-    # definitions for the axes
     left, width = 0.1, 0.6
     bottom, height = 0.1, 0.65
     spacing = 0.005
@@ -263,7 +312,6 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     rect_histx = [left, bottom + height + spacing, width, 0.2]
     rect_histy = [left + width + spacing, bottom, 0.2, height]
 
-    # start with a rectangular Figure
     plt.figure(figsize=(9, 8))
 
     ax_scatter = plt.axes(rect_scatter)
@@ -273,24 +321,22 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     ax_histy = plt.axes(rect_histy)
     ax_histy.tick_params(direction='in', labelleft=False)
 
-    # the scatter plot:
     lbl = r'$N = %i$' % len(radiff)
-    print('starting plot...')
+    logger.info("Starting plot...")
     sc = ax_scatter.scatter(radiff, dediff, c=abspm,
                             s=10, cmap='plasma', label=lbl)
-    print('finished plot...')
+    logger.info("Finished scatter plot...")
     ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
                       fontsize=12)
     if contour:
-        print('calculating contours...')
+        logger.info("Calculatinig contours...")
         contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=[0.3, 4.55, 31.7],
                     colors=colours)
-        print('Done!')
+        logger.info("Done!")
 
     cb = plt.colorbar(sc, ax=ax_histy, pad=.02)
     cb.set_label(r'$|\mu|\ \mathrm{[mas\,yr^{-1}]}$', fontsize=20)
-    # plt.setp(cb.get_xticklabels(), fontsize=14)
     cb.ax.tick_params(labelsize=14)
 
     # now determine nice limits by hand:
@@ -301,8 +347,7 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     plt.setp(ax_scatter.get_xticklabels(), fontsize=14)
     plt.setp(ax_scatter.get_yticklabels(), fontsize=14)
 
-    # plot stats
-    print('plotting histograms percentiles...')
+    logger.info("Plotting histograms for the percentiles...")
     ax_histx.axvline(percra[0], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[1], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[2], color='k', linestyle='dashed', lw=1, zorder=1)
@@ -319,24 +364,20 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     ax_histy.axhline(percde[6], color='k', linestyle='dashed', lw=1, zorder=1)
 
     # build hists
-    print('building histograms...')
+    logger.info("Building histograms...")
     if radiff.size < 1000000:
         bins = np.arange(-lim, lim + binwidth, binwidth)
     else:
         bins = 1000
-    # xlbl = r'$\overline{\Delta\alpha} = %.3f$' % percra[3].value
-    xlbl = r'$\widetilde{\Delta\alpha} = %.3f$' % percra[3]
-    xlbl += '\n'
-    xlbl += r'$\sigma = %.3f$' % np.std(radiff)
-    print('build RA histogram...')
+    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3].value, '\n',
+                    r'$\sigma = %.3f$' % np.std(radiff)])
+    logger.info("Building RA histogram...")
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
-    # ylbl = r'$\overline{\Delta\delta} = %.3f$' % percde[3].value
-    ylbl = r'$\widetilde{\Delta\delta} = %.3f$' % percde[3]
-    ylbl += '\n'
-    ylbl += r'$\sigma = %.3f$' % np.std(dediff)
-    print('build DEC histogram...')
+    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3].value, '\n',
+                    r'$\sigma = %.3f$' % np.std(dediff)])
+    logger.info("Building DEC histogram...")
     yx, yy, _ = ax_histy.hist(dediff, bins=bins, orientation='horizontal',
                               label=ylbl, alpha=0.8, zorder=10)
     ax_histy.legend(loc='upper right', handlelength=0, fontsize=12)
@@ -350,7 +391,7 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
 
     if savefig:
         figpath = datatab.split('.')[0] + '.png'
-        print('saving fig', figpath)
+        logger.info("Saving figure at %s" % figpath)
         plt.savefig(figpath, format='png', dpi=360)
     showfig = True
     if showfig:
@@ -361,19 +402,102 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     return
 
 
+def parser():
+    """
+    Parse the arguments from the command line
+    """
+
+    parser = argparse.ArgumentParser(
+        description='Calculate astrometric differences between S-PLUS and Gaia DR2 or DR3')
+    parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
+                        help='Workdir path. Default is current directory',
+                        required=False)
+    parser.add_argument('-g', '--gaia_dr', type=str, default='355',
+                        help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
+    parser.add_argument('-p', '--cat_name_preffix', type=str, default='',
+                        help='Preffix of the catalogue name. Default is empty')
+    parser.add_argument('-s', '--cat_name_suffix', type=str, default='',
+                        help='Suffix of the catalogue name. Default is empty')
+    parser.add_argument('-c', '--cathdu', type=int, default=1,
+                        help='HDU number of the catalogue. Default is 1')
+    parser.add_argument('-r', '--racolumn', type=str, default='RA',
+                        help='Column name of the RA in the catalogue. Default is RA')
+    parser.add_argument('-d', '--decolumn', type=str, default='DEC',
+                        help='Column name of the DEC in the catalogue. Default is DEC')
+    parser.add_argument('-m', '--mag_column', type=str, default='MAG_AUTO',
+                        help='Column name of the magnitude in the catalogue. Default is MAG_AUTO')
+    parser.add_argument('-f', '--flags_column', type=str, default=None,
+                        help='Column name of the flags in the catalogue. Default is None')
+    parser.add_argument('-l', '--clstar_column', type=str, default=None,
+                        help='Column name of the clstar in the catalogue. Default is None')
+    parser.add_argument('-w', '--fwhm_column', type=str, default=None,
+                        help='Column name of the fwhm in the catalogue. Default is None')
+    parser.add_argument('-s', '--sn_column', type=str, default=None,
+                        help='Column name of the sn in the catalogue. Default is None')
+    parser.add_argument('-t', '--filetype', type=str, default='.fits',
+                        help='Filetype of the catalogue. Default is .fits')
+    parser.add_argument('-a', '--angle', type=float, default=1.0,
+                        help='Angle to be used in the crossmatch. Default is 1.0')
+    parser.add_argument('-n', '--sn_limit', type=float, default=10.0,
+                        help='Signal-to-noise limit to be used in the crossmatch. Default is 10.0')
+    parser.add_argument('-o', '--output', type=str, default='splus_gaia_astrometry',
+                        help='Output name. Default is splus_gaia_astrometry')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Prints out the progress of the code. Default is False')
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help='Prints out the debug of the code. Default is False')
+
+    args = parser.parse_args()
+
+    return args
+
+
+def call_logger():
+    """Configure the logger."""
+    # reset logging config
+    logging.shutdown()
+    logging.root.handlers.clear()
+
+    # configure the module with colorlog
+    logger = colorlog.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # create a formatter with green color for INFO level
+    formatter = colorlog.ColoredFormatter(
+        '%(log_color)s%(levelname)s:%(name)s:%(message)s',
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'blue',
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        })
+
+    # create handler and set the formatter
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+
+    # add the handler to the logger
+    logger.addHandler(ch)
+
+
 if __name__ == '__main__':
     get_gaia = True
     make_plot = True
 
+    # get the path where the code resides
+    code_path = os.path.dirname(os.path.abspath(__file__))
+
     # calculate astrometric precision for MAR catalogues
     workdir = '/ssd/splus/astrocatalogs/'
-    # workdir = '/storage/splus/splusDR4_auto-gaiaDR3-astrometry-cos/'
 
     if get_gaia:
         # initialize the class
         gasp = SplusGaiaAst()
 
         # define default paths and additives
+        call_logger()
+        gasp.logger = logging.getLogger('splus_logger')
         gasp.workdir = workdir
         gasp.racolumn = 'ALPHA_J2000'
         gasp.decolumn = 'DELTA_J2000'
