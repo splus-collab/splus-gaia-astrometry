@@ -14,6 +14,7 @@
 
 from statspack.statspack import contour_pdf
 import os
+import sys
 import numpy as np
 from astropy.io import ascii, fits
 from astropy.coordinates import SkyCoord
@@ -32,23 +33,28 @@ import colorlog
 
 class SplusGaiaAst(object):
 
-    def __init__(self):
-        self.workdir: str = os.getcwd()
-        # Gaia DR2 =345; Gaia DR3 = 355
-        self.gaia_dr = '355'
-        self.cat_name_preffix: str = ''
-        self.cat_name_suffix: str = ''
-        self.cathdu: int = 1
-        self.racolumn: str = 'RA'
-        self.decolumn: str = 'DEC'
-        self.mag_column: str = 'MAG_AUTO'
-        self.flags_column = None
-        self.clstar_column = None
-        self.fwhm_column = None
-        self.sn_column = None
-        self.filetype = '.fits'
-        self.angle: float = 1.0
-        self.sn_limit: float = 10.
+    def __init__(self, args):
+        self.workdir: str = args.workdir
+        self.gaia_dr = args.gaia_dr
+        self.cat_name_preffix: str = args.cat_name_preffix
+        self.cat_name_suffix: str = args.cat_name_suffix
+        self.cathdu: int = args.hdu
+        self.racolumn: str = args.racolumn
+        self.decolumn: str = args.deccolumn
+        self.mag_column: str = args.mag_column
+        self.flags_column = args.flags_column
+        self.clstar_column = args.clstar_column
+        self.fwhm_column = args.fwhm_column
+        self.sn_column = args.sn_column
+        self.filetype = args.filetype
+        self.angle: float = args.angle
+        self.sn_limit: float = args.sn_limit
+        self.output: str = args.output
+        self.savefig: bool = args.savefig
+        self.bins = args.bins
+        self.limit = args.limit
+        self.debug: bool = args.debug
+        self.verbose: bool = args.verbose
         self.logger = logging.getLogger(__name__)
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
@@ -412,40 +418,52 @@ def parser():
     parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
                         help='Workdir path. Default is current directory',
                         required=False)
+    # Gaia DR2 =345; Gaia DR3 = 355
     parser.add_argument('-g', '--gaia_dr', type=str, default='355',
                         help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
     parser.add_argument('-p', '--cat_name_preffix', type=str, default='',
                         help='Preffix of the catalogue name. Default is empty')
     parser.add_argument('-s', '--cat_name_suffix', type=str, default='',
                         help='Suffix of the catalogue name. Default is empty')
-    parser.add_argument('-c', '--cathdu', type=int, default=1,
+    parser.add_argument('-c', '--hdu', type=int, default=1,
                         help='HDU number of the catalogue. Default is 1')
-    parser.add_argument('-r', '--racolumn', type=str, default='RA',
+    parser.add_argument('-ra', '--racolumn', type=str, default='RA',
                         help='Column name of the RA in the catalogue. Default is RA')
-    parser.add_argument('-d', '--decolumn', type=str, default='DEC',
+    parser.add_argument('-de', '--deccolumn', type=str, default='DEC',
                         help='Column name of the DEC in the catalogue. Default is DEC')
     parser.add_argument('-m', '--mag_column', type=str, default='MAG_AUTO',
                         help='Column name of the magnitude in the catalogue. Default is MAG_AUTO')
     parser.add_argument('-f', '--flags_column', type=str, default=None,
                         help='Column name of the flags in the catalogue. Default is None')
-    parser.add_argument('-l', '--clstar_column', type=str, default=None,
+    parser.add_argument('-cs', '--clstar_column', type=str, default=None,
                         help='Column name of the clstar in the catalogue. Default is None')
-    parser.add_argument('-w', '--fwhm_column', type=str, default=None,
+    parser.add_argument('-fwhm', '--fwhm_column', type=str, default=None,
                         help='Column name of the fwhm in the catalogue. Default is None')
-    parser.add_argument('-s', '--sn_column', type=str, default=None,
+    parser.add_argument('-sn', '--sn_column', type=str, default=None,
                         help='Column name of the sn in the catalogue. Default is None')
     parser.add_argument('-t', '--filetype', type=str, default='.fits',
                         help='Filetype of the catalogue. Default is .fits')
     parser.add_argument('-a', '--angle', type=float, default=1.0,
                         help='Angle to be used in the crossmatch. Default is 1.0')
-    parser.add_argument('-n', '--sn_limit', type=float, default=10.0,
+    parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
                         help='Signal-to-noise limit to be used in the crossmatch. Default is 10.0')
     parser.add_argument('-o', '--output', type=str, default='splus_gaia_astrometry',
                         help='Output name. Default is splus_gaia_astrometry')
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        help='Prints out the progress of the code. Default is False')
+    parser.add_argument('-sf', '--savefig', action='store_true',
+                        help='Save the figure. Default is False')
+    parser.add_argument('-b', '--bins', type=int, default=1000,
+                        help='Number of bins in the histogram. Default is 1000')
+    parser.add_argument('-l', '--limit', type=float, default=0.5,
+                        help='Limit of the histogram. Default is 0.5')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='Prints out the debug of the code. Default is False')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Prints out the progress of the code. Default is False')
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        raise argparse.ArgumentTypeError(
+            'No arguments provided. Showing the help message.')
 
     args = parser.parse_args()
 
@@ -482,21 +500,19 @@ def call_logger():
 
 
 if __name__ == '__main__':
-    get_gaia = True
-    make_plot = True
-
+    call_logger()
     # get the path where the code resides
     code_path = os.path.dirname(os.path.abspath(__file__))
-
-    # calculate astrometric precision for MAR catalogues
-    workdir = '/ssd/splus/astrocatalogs/'
+    # get the arguments passed from the command line
+    args = parser()
+    gasp = SplusGaiaAst(args)
+    sys.exit(0)
 
     if get_gaia:
         # initialize the class
         gasp = SplusGaiaAst()
 
         # define default paths and additives
-        call_logger()
         gasp.logger = logging.getLogger('splus_logger')
         gasp.workdir = workdir
         gasp.racolumn = 'ALPHA_J2000'
