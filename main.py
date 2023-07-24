@@ -34,7 +34,10 @@ import colorlog
 class SplusGaiaAst(object):
 
     def __init__(self, args):
+        self.tiles: str = args.tiles
         self.workdir: str = args.workdir
+        self.datadir: str = args.datadir
+        self.footprint: str = args.footprint
         self.gaia_dr = args.gaia_dr
         self.cat_name_preffix: str = args.cat_name_preffix
         self.cat_name_suffix: str = args.cat_name_suffix
@@ -56,6 +59,31 @@ class SplusGaiaAst(object):
         self.debug: bool = args.debug
         self.verbose: bool = args.verbose
         self.logger = logging.getLogger(__name__)
+
+    # get footprint of the survey
+    def get_footprint(self):
+        """
+        Get the footprint of the survey
+
+        Parameters
+        ----------
+        footprint : str
+            Path to the footprint file
+
+        Returns
+        -------
+        footprint : astropy Table
+            Table containing the footprint of the survey
+        """
+        path_to_foot = os.path.abspath(self.footprint)
+        try:
+            footprint = ascii.read(path_to_foot)
+        except FileNotFoundError:
+            self.logger.error('Footprint file {} not found'.format(
+                path_to_foot))
+            sys.exit(1)
+
+        return footprint
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
@@ -117,12 +145,14 @@ class SplusGaiaAst(object):
                 self.logger.info("File %s already exists. Skipping",
                                  os.path.join(workdir, "".join(['gaia_', gaia_dr])))
 
-        print('saving result of match with gaia to', gaia_cat_path)
+        if self.verbose:
+            self.logger.info(
+                'Saving gaia catalogue to cache %s', gaia_cat_path)
         gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
 
         return gaia_data
 
-    def calculate_astdiff(self, fields, footprint, workdir=None, gaia_dr=None, cat_name_preffix=None,
+    def calculate_astdiff(self, workdir=None, gaia_dr=None, cat_name_preffix=None,
                           cat_name_suffix=None):
         """
         Calculate the astrometric differences between any SPLUS catalogue as
@@ -159,11 +189,14 @@ class SplusGaiaAst(object):
         cat_name_preffix = self.cat_name_preffix if cat_name_preffix is None else cat_name_preffix
         cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
 
+        # get the footprint of the survey
+        footprint = self.get_footprint()
         try:
             field_names = np.array([n.replace('_', '-')
                                     for n in footprint['NAME']])
         except ValueError:
             field_names = footprint['NAME']
+
         results_dir = os.path.join(workdir, 'results/')
         if not os.path.isdir(results_dir):
             os.mkdir(results_dir)
@@ -415,8 +448,17 @@ def parser():
 
     parser = argparse.ArgumentParser(
         description='Calculate astrometric differences between S-PLUS and Gaia DR2 or DR3')
+    parser.add_argument('-t', '--tiles', type=str,
+                        help='List of tiles to be processed. Default is tiles_new_status.csv',
+                        required=True)
+    parser.add_argument('-f', '--footprint', type=str,
+                        help='Fooprint file containing the positions of the S-PLUS tiles.',
+                        required=True)
     parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
                         help='Workdir path. Default is current directory',
+                        required=False)
+    parser.add_argument('-d', '--datadir', type=str, default=None,
+                        help='Data directory path. Default is workdir',
                         required=False)
     # Gaia DR2 =345; Gaia DR3 = 355
     parser.add_argument('-g', '--gaia_dr', type=str, default='355',
@@ -426,14 +468,14 @@ def parser():
     parser.add_argument('-s', '--cat_name_suffix', type=str, default='',
                         help='Suffix of the catalogue name. Default is empty')
     parser.add_argument('-c', '--hdu', type=int, default=1,
-                        help='HDU number of the catalogue. Default is 1')
+                        help='HDU number of the catalogue when catalgue is FIST. Default is 1')
     parser.add_argument('-ra', '--racolumn', type=str, default='RA',
                         help='Column name of the RA in the catalogue. Default is RA')
     parser.add_argument('-de', '--deccolumn', type=str, default='DEC',
                         help='Column name of the DEC in the catalogue. Default is DEC')
     parser.add_argument('-m', '--mag_column', type=str, default='MAG_AUTO',
                         help='Column name of the magnitude in the catalogue. Default is MAG_AUTO')
-    parser.add_argument('-f', '--flags_column', type=str, default=None,
+    parser.add_argument('-fl', '--flags_column', type=str, default=None,
                         help='Column name of the flags in the catalogue. Default is None')
     parser.add_argument('-cs', '--clstar_column', type=str, default=None,
                         help='Column name of the clstar in the catalogue. Default is None')
@@ -441,7 +483,7 @@ def parser():
                         help='Column name of the fwhm in the catalogue. Default is None')
     parser.add_argument('-sn', '--sn_column', type=str, default=None,
                         help='Column name of the sn in the catalogue. Default is None')
-    parser.add_argument('-t', '--filetype', type=str, default='.fits',
+    parser.add_argument('-ft', '--filetype', type=str, default='.fits',
                         help='Filetype of the catalogue. Default is .fits')
     parser.add_argument('-a', '--angle', type=float, default=1.0,
                         help='Angle to be used in the crossmatch. Default is 1.0')
@@ -455,7 +497,7 @@ def parser():
                         help='Number of bins in the histogram. Default is 1000')
     parser.add_argument('-l', '--limit', type=float, default=0.5,
                         help='Limit of the histogram. Default is 0.5')
-    parser.add_argument('-d', '--debug', action='store_true',
+    parser.add_argument('--debug', action='store_true',
                         help='Prints out the debug of the code. Default is False')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Prints out the progress of the code. Default is False')
@@ -506,35 +548,20 @@ if __name__ == '__main__':
     # get the arguments passed from the command line
     args = parser()
     gasp = SplusGaiaAst(args)
-    sys.exit(0)
+    gasp.datadir = args.datadir if args.datadir is not None else args.workdir
 
-    if get_gaia:
-        # initialize the class
-        gasp = SplusGaiaAst()
+    # read text file with the list of tiles to consider
+    textfile_path = os.path.join(gasp.workdir, gasp.tiles)
+    assert os.path.exists(textfile_path), 'File {} does not exist'.format(
+        textfile_path)
+    fields = pd.read_csv(textfile_path, sep=' ',
+                         header=None, names=['NAME'])
 
-        # define default paths and additives
-        gasp.logger = logging.getLogger('splus_logger')
-        gasp.workdir = workdir
-        gasp.racolumn = 'ALPHA_J2000'
-        gasp.decolumn = 'DELTA_J2000'
-        gasp.cat_name_preffix = 'mar_cats/'
-        gasp.cat_name_suffix = '.cat'
-        gasp.mag_column = 'MAG_AUTO'
-        gasp.flags_column = 'FLAGS'
-        # gasp.clstar_column = 'CLASS_STAR'
-        # gasp.sn_column = 's2n_r_psf'
-        # gasp.sn_limit = 20.
-        # gasp.fwhm_column = 'FWHM_R'
-        gasp.cathdu = 2
-
-        # read footprint table
-        footprint = ascii.read(workdir + 'tiles_new_status.csv')
-        # read list of fields to process
-        fields = pd.read_csv(workdir + 'mar_fields.csv')
-
-        # calculate to all tiles at once
-        num_procs = 8
-        b = list(fields['NAME'])
+    sys.exit()
+    # calculate to all tiles at once
+    num_procs = 8
+    b = list(fields['NAME'])
+    if num_procs == 1:
         num_fields = np.unique(b).size
         if num_fields % num_procs > 0:
             print('reprojecting', num_fields, 'fields')
