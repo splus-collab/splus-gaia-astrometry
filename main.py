@@ -31,13 +31,83 @@ import logging
 import colorlog
 
 
+def parser():
+    """
+    Parse the arguments from the command line
+    """
+
+    parser = argparse.ArgumentParser(
+        description='Calculate astrometric differences between S-PLUS and Gaia DR2 or DR3')
+    parser.add_argument('-t', '--tiles', type=str,
+                        help='List of tiles to be processed. Default is tiles_new_status.csv',
+                        required=True)
+    parser.add_argument('-f', '--footprint', type=str,
+                        help='Fooprint file containing the positions of the S-PLUS tiles.',
+                        required=True)
+    parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
+                        help='Workdir path. Default is current directory',
+                        required=False)
+    parser.add_argument('-d', '--datadir', type=str, default=None,
+                        help='Data directory path. Default is workdir',
+                        required=False)
+    # Gaia DR2 =345; Gaia DR3 = 355
+    parser.add_argument('-g', '--gaia_dr', type=str, default='355',
+                        help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
+    parser.add_argument('-p', '--cat_name_preffix', type=str, default='',
+                        help='Preffix of the catalogue name. Default is empty')
+    parser.add_argument('-s', '--cat_name_suffix', type=str, default='',
+                        help='Suffix of the catalogue name. Default is empty')
+    parser.add_argument('-c', '--hdu', type=int, default=1,
+                        help='HDU number of the catalogue when catalgue is FIST. Default is 1')
+    parser.add_argument('-ra', '--racolumn', type=str, default='RA',
+                        help='Column name of the RA in the catalogue. Default is RA')
+    parser.add_argument('-de', '--deccolumn', type=str, default='DEC',
+                        help='Column name of the DEC in the catalogue. Default is DEC')
+    parser.add_argument('-m', '--mag_column', type=str, default='MAG_AUTO',
+                        help='Column name of the magnitude in the catalogue. Default is MAG_AUTO')
+    parser.add_argument('-fl', '--flags_column', type=str, default=None,
+                        help='Column name of the flags in the catalogue. Default is None')
+    parser.add_argument('-cs', '--clstar_column', type=str, default=None,
+                        help='Column name of the clstar in the catalogue. Default is None')
+    parser.add_argument('-fwhm', '--fwhm_column', type=str, default=None,
+                        help='Column name of the fwhm in the catalogue. Default is None')
+    parser.add_argument('-sn', '--sn_column', type=str, default=None,
+                        help='Column name of the sn in the catalogue. Default is None')
+    parser.add_argument('-ft', '--filetype', type=str, default='.fits',
+                        help='Filetype of the catalogue. Default is .fits')
+    parser.add_argument('-a', '--angle', type=float, default=1.0,
+                        help='Angle to be used in the crossmatch. Default is 1.0')
+    parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
+                        help='Signal-to-noise limit to be used in the crossmatch. Default is 10.0')
+    parser.add_argument('-o', '--output', type=str, default='splus_gaia_astrometry',
+                        help='Output name. Default is splus_gaia_astrometry')
+    parser.add_argument('-sf', '--savefig', action='store_true',
+                        help='Save the figure. Default is False')
+    parser.add_argument('-b', '--bins', type=int, default=1000,
+                        help='Number of bins in the histogram. Default is 1000')
+    parser.add_argument('-l', '--limit', type=float, default=0.5,
+                        help='Limit of the histogram. Default is 0.5')
+    parser.add_argument('--debug', action='store_true',
+                        help='Prints out the debug of the code. Default is False')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Prints out the progress of the code. Default is False')
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        raise argparse.ArgumentTypeError(
+            'No arguments provided. Showing the help message.')
+
+    args = parser.parse_args()
+
+    return args
+
+
 class SplusGaiaAst(object):
 
     def __init__(self, args):
         self.tiles: str = args.tiles
         self.workdir: str = args.workdir
         self.datadir: str = args.datadir
-        self.footprint: str = args.footprint
         self.gaia_dr = args.gaia_dr
         self.cat_name_preffix: str = args.cat_name_preffix
         self.cat_name_suffix: str = args.cat_name_suffix
@@ -59,31 +129,6 @@ class SplusGaiaAst(object):
         self.debug: bool = args.debug
         self.verbose: bool = args.verbose
         self.logger = logging.getLogger(__name__)
-
-    # get footprint of the survey
-    def get_footprint(self):
-        """
-        Get the footprint of the survey
-
-        Parameters
-        ----------
-        footprint : str
-            Path to the footprint file
-
-        Returns
-        -------
-        footprint : astropy Table
-            Table containing the footprint of the survey
-        """
-        path_to_foot = os.path.abspath(self.footprint)
-        try:
-            footprint = ascii.read(path_to_foot)
-        except FileNotFoundError:
-            self.logger.error('Footprint file {} not found'.format(
-                path_to_foot))
-            sys.exit(1)
-
-        return footprint
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
@@ -152,7 +197,7 @@ class SplusGaiaAst(object):
 
         return gaia_data
 
-    def calculate_astdiff(self, workdir=None, gaia_dr=None, cat_name_preffix=None,
+    def calculate_astdiff(self, footprint, field_names, workdir=None, gaia_dr=None, cat_name_preffix=None,
                           cat_name_suffix=None):
         """
         Calculate the astrometric differences between any SPLUS catalogue as
@@ -188,14 +233,6 @@ class SplusGaiaAst(object):
         workdir = self.workdir if workdir is None else workdir
         cat_name_preffix = self.cat_name_preffix if cat_name_preffix is None else cat_name_preffix
         cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
-
-        # get the footprint of the survey
-        footprint = self.get_footprint()
-        try:
-            field_names = np.array([n.replace('_', '-')
-                                    for n in footprint['NAME']])
-        except ValueError:
-            field_names = footprint['NAME']
 
         results_dir = os.path.join(workdir, 'results/')
         if not os.path.isdir(results_dir):
@@ -441,77 +478,6 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     return
 
 
-def parser():
-    """
-    Parse the arguments from the command line
-    """
-
-    parser = argparse.ArgumentParser(
-        description='Calculate astrometric differences between S-PLUS and Gaia DR2 or DR3')
-    parser.add_argument('-t', '--tiles', type=str,
-                        help='List of tiles to be processed. Default is tiles_new_status.csv',
-                        required=True)
-    parser.add_argument('-f', '--footprint', type=str,
-                        help='Fooprint file containing the positions of the S-PLUS tiles.',
-                        required=True)
-    parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
-                        help='Workdir path. Default is current directory',
-                        required=False)
-    parser.add_argument('-d', '--datadir', type=str, default=None,
-                        help='Data directory path. Default is workdir',
-                        required=False)
-    # Gaia DR2 =345; Gaia DR3 = 355
-    parser.add_argument('-g', '--gaia_dr', type=str, default='355',
-                        help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
-    parser.add_argument('-p', '--cat_name_preffix', type=str, default='',
-                        help='Preffix of the catalogue name. Default is empty')
-    parser.add_argument('-s', '--cat_name_suffix', type=str, default='',
-                        help='Suffix of the catalogue name. Default is empty')
-    parser.add_argument('-c', '--hdu', type=int, default=1,
-                        help='HDU number of the catalogue when catalgue is FIST. Default is 1')
-    parser.add_argument('-ra', '--racolumn', type=str, default='RA',
-                        help='Column name of the RA in the catalogue. Default is RA')
-    parser.add_argument('-de', '--deccolumn', type=str, default='DEC',
-                        help='Column name of the DEC in the catalogue. Default is DEC')
-    parser.add_argument('-m', '--mag_column', type=str, default='MAG_AUTO',
-                        help='Column name of the magnitude in the catalogue. Default is MAG_AUTO')
-    parser.add_argument('-fl', '--flags_column', type=str, default=None,
-                        help='Column name of the flags in the catalogue. Default is None')
-    parser.add_argument('-cs', '--clstar_column', type=str, default=None,
-                        help='Column name of the clstar in the catalogue. Default is None')
-    parser.add_argument('-fwhm', '--fwhm_column', type=str, default=None,
-                        help='Column name of the fwhm in the catalogue. Default is None')
-    parser.add_argument('-sn', '--sn_column', type=str, default=None,
-                        help='Column name of the sn in the catalogue. Default is None')
-    parser.add_argument('-ft', '--filetype', type=str, default='.fits',
-                        help='Filetype of the catalogue. Default is .fits')
-    parser.add_argument('-a', '--angle', type=float, default=1.0,
-                        help='Angle to be used in the crossmatch. Default is 1.0')
-    parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
-                        help='Signal-to-noise limit to be used in the crossmatch. Default is 10.0')
-    parser.add_argument('-o', '--output', type=str, default='splus_gaia_astrometry',
-                        help='Output name. Default is splus_gaia_astrometry')
-    parser.add_argument('-sf', '--savefig', action='store_true',
-                        help='Save the figure. Default is False')
-    parser.add_argument('-b', '--bins', type=int, default=1000,
-                        help='Number of bins in the histogram. Default is 1000')
-    parser.add_argument('-l', '--limit', type=float, default=0.5,
-                        help='Limit of the histogram. Default is 0.5')
-    parser.add_argument('--debug', action='store_true',
-                        help='Prints out the debug of the code. Default is False')
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        help='Prints out the progress of the code. Default is False')
-
-    if len(sys.argv) == 1:
-        parser.print_help()
-        raise argparse.ArgumentTypeError(
-            'No arguments provided. Showing the help message.')
-
-    args = parser.parse_args()
-
-    return args
-
-
 def call_logger():
     """Configure the logger."""
     # reset logging config
@@ -541,6 +507,44 @@ def call_logger():
     logger.addHandler(ch)
 
 
+def get_footprint(foot_path, logger):
+    """
+    Get the footprint of the survey
+
+    Parameters
+    ----------
+    footprint : str
+        Path to the footprint file
+
+    Returns
+    -------
+    footprint : astropy Table
+        Table containing the footprint of the survey
+    """
+    path_to_foot = os.path.abspath(foot_path)
+    try:
+        footprint = ascii.read(path_to_foot)
+    except FileNotFoundError:
+        logger.error('Footprint file {} not found'.format(path_to_foot))
+        sys.exit(1)
+
+    return footprint
+
+
+def get_fields_names(footprint):
+    """
+    Get the names of the fields in the footprint and correct them is necessary
+    """
+
+    try:
+        field_names = np.array([n.replace('_', '-')
+                                for n in footprint['NAME']])
+    except ValueError:
+        field_names = footprint['NAME']
+
+    return field_names
+
+
 if __name__ == '__main__':
     call_logger()
     # get the path where the code resides
@@ -556,6 +560,11 @@ if __name__ == '__main__':
         textfile_path)
     fields = pd.read_csv(textfile_path, sep=' ',
                          header=None, names=['NAME'])
+
+    # get the footprint of the survey
+    footprint = get_footprint(args.footprint, logging.getLogger(__name__))
+    # get the names of the fields in the footprint
+    field_names = get_fields_names(footprint)
 
     sys.exit()
     # calculate to all tiles at once
