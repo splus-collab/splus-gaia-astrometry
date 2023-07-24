@@ -26,7 +26,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import multiprocessing as mp
 import time
-import glob
 import argparse
 import logging
 import colorlog
@@ -54,10 +53,6 @@ def parser():
     # Gaia DR2 =345; Gaia DR3 = 355
     parser.add_argument('-g', '--gaia_dr', type=str, default='355',
                         help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
-    parser.add_argument('-p', '--cat_name_preffix', type=str, default='',
-                        help='Preffix of the catalogue name. Default is empty')
-    parser.add_argument('-s', '--cat_name_suffix', type=str, default='',
-                        help='Suffix of the catalogue name. Default is empty')
     parser.add_argument('-c', '--hdu', type=int, default=1,
                         help='HDU number of the catalogue when catalgue is FIST. Default is 1')
     parser.add_argument('-ra', '--racolumn', type=str, default='RA',
@@ -74,19 +69,17 @@ def parser():
                         help='Column name of the fwhm in the catalogue. Default is None')
     parser.add_argument('-sn', '--sn_column', type=str, default=None,
                         help='Column name of the sn in the catalogue. Default is None')
-    parser.add_argument('-ft', '--filetype', type=str, default='.fits',
-                        help='Filetype of the catalogue. Default is .fits')
     parser.add_argument('-a', '--angle', type=float, default=1.0,
                         help='Angle to be used in the crossmatch. Default is 1.0')
     parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
                         help='Signal-to-noise limit to be used in the crossmatch. Default is 10.0')
-    parser.add_argument('-o', '--output', type=str, default='splus_gaia_astrometry',
-                        help='Output name. Default is splus_gaia_astrometry')
+    parser.add_argument('-o', '--output', type=str, default='results_stacked.csv',
+                        help='Output name of the stacked catalogue. Default is results_stacked.csv')
     parser.add_argument('-sf', '--savefig', action='store_true',
                         help='Save the figure. Default is False')
     parser.add_argument('-b', '--bins', type=int, default=1000,
                         help='Number of bins in the histogram. Default is 1000')
-    parser.add_argument('-l', '--limit', type=float, default=0.5,
+    parser.add_argument('-l', '--limits', type=float, default=0.05,
                         help='Limit of the histogram. Default is 0.5')
     parser.add_argument('-nc', '--ncores', type=int, default=1,
                         help='Number of cores to be used. Default is 1')
@@ -455,7 +448,7 @@ class SplusGaiaAst(object):
         return gaia_data
 
 
-def plot_diffs(datatab, contour=False, colours=None, savefig=False):
+def plot_diffs(datatab, args):
     """
     Plots the differences between S-PLUS and Gaia.
 
@@ -470,6 +463,11 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     savefig : bool, optional
         If True, saves the figure.
     """
+    contour = args.contour
+    colours = args.colours
+    savefig = args.savefig
+    bins = args.bins
+    limits = args.limits
 
     call_logger()
     logger = logging.getLogger(__name__)
@@ -523,7 +521,7 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
     cb.ax.tick_params(labelsize=14)
 
     # now determine nice limits by hand:
-    binwidth = 0.05
+    binwidth = limits
     lim = np.ceil(np.abs([radiff, dediff]).max() / binwidth) * binwidth
     ax_scatter.set_xlim((-lim, lim))
     ax_scatter.set_ylim((-lim, lim))
@@ -628,17 +626,20 @@ if __name__ == '__main__':
         gasp.logger.error("No matches found. Exiting...")
         sys.exit(1)
     else:
-        gasp.logger.info("Found %d matches. Starting staking" %
-                         len(list_of_matches))
-        # stack the results
-        stacked_results = vstack(list_of_matches)
-        gasp.logger.info("Saving results to %s" %
-                         os.path.join(args.workdir, 'results_stacked.csv'))
-        stacked_results.write(os.path.join(
-            args.workdir, 'results_stacked.csv'), overwrite=True)
+        file_to_save = os.path.join(args.workdir, args.output)
+        if os.path.isfile(file_to_save) and not args.clobber:
+            gasp.logger.warning("File %s already exists. Use --clobber to force overwrite." %
+                                file_to_save)
+        else:
+            gasp.logger.info("Found %d matches. Starting staking" %
+                             len(list_of_matches))
+            # stack the results
+            stacked_results = vstack(list_of_matches)
+            gasp.logger.info("Saving results to %s" % file_to_save)
+            stacked_results.write(file_to_save, format='csv', overwrite=True)
 
-    datatab = os.path.join(args.workdir, 'results_stacked.csv')
+    datatab = os.path.join(args.workdir, args.output)
 
     print('running plot module for table', datatab)
     plot_diffs(datatab, contour=False, colours=[
-               'limegreen', 'yellowgreen', 'c'], savefig=False)
+               'limegreen', 'yellowgreen', 'c'], savefig=args.savefig)
