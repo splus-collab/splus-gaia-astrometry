@@ -25,10 +25,22 @@ from astroquery.vizier import Vizier
 import pandas as pd
 import matplotlib.pyplot as plt
 import multiprocessing as mp
-import time
+from datetime import datetime
 import argparse
 import logging
 import colorlog
+import git
+
+__author__ = 'Fabio R Herpich'
+__email__ = 'fabio.herpich@ast.cam.ac.uk'
+
+__path__ = os.path.dirname(os.path.abspath(__file__))
+repo = git.Repo(__path__)
+try:
+    latest_tag = repo.git.describe('--tags').lstrip('v')
+    __version__ = latest_tag.lstrip('v')
+except Exception:
+    __version__ = 'unknown'
 
 
 def parser():
@@ -53,7 +65,7 @@ def parser():
     # Gaia DR2 =345; Gaia DR3 = 355
     parser.add_argument('-g', '--gaia_dr', type=str, default='355',
                         help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
-    parser.add_argument('-c', '--hdu', type=int, default=1,
+    parser.add_argument('-u', '--hdu', type=int, default=1,
                         help='HDU number of the catalogue when catalgue is FIST. Default is 1')
     parser.add_argument('-ra', '--racolumn', type=str, default='RA',
                         help='Column name of the RA in the catalogue. Default is RA')
@@ -69,20 +81,20 @@ def parser():
                         help='Column name of the fwhm in the catalogue. Default is None')
     parser.add_argument('-sn', '--sn_column', type=str, default=None,
                         help='Column name of the sn in the catalogue. Default is None')
-    parser.add_argument('-a', '--angle', type=float, default=1.0,
-                        help='Angle to be used in the crossmatch. Default is 1.0')
+    parser.add_argument('-a', '--angle', type=float, default=5.0,
+                        help='Angle to be used in the crossmatch between Gaia and S-PLUS. Default is 5.0 arcsec')
     parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
-                        help='Signal-to-noise limit to be used in the crossmatch. Default is 10.0')
+                        help='Signal-to-noise lower limit to be used in the crossmatch. Default is 10.0')
     parser.add_argument('-o', '--output', type=str, default='results_stacked.csv',
                         help='Output name of the stacked catalogue. Default is results_stacked.csv')
-    parser.add_argument('-sf', '--savefig', action='store_true',
-                        help='Save the figure. Default is False')
     parser.add_argument('-b', '--bins', type=int, default=1000,
                         help='Number of bins in the histogram. Default is 1000')
     parser.add_argument('-l', '--limits', type=float, default=0.05,
                         help='Limit of the histogram. Default is 0.5')
     parser.add_argument('-nc', '--ncores', type=int, default=1,
                         help='Number of cores to be used. Default is 1')
+    parser.add_argument('-sf', '--savefig', action='store_true',
+                        help='Save the figure. Default is False')
     parser.add_argument('--debug', action='store_true',
                         help='Prints out the debug of the code. Default is False')
     parser.add_argument('-vv', '--verbose', action='store_true',
@@ -103,13 +115,12 @@ def parser():
 class SplusGaiaAst(object):
 
     def __init__(self, args):
+        # atrgs from parser
         self.tiles: str = args.tiles
         self.footprint: str = args.footprint
         self.workdir: str = args.workdir
         self.datadir: str = args.datadir
         self.gaia_dr = args.gaia_dr
-        self.cat_name_preffix: str = args.cat_name_preffix
-        self.cat_name_suffix: str = args.cat_name_suffix
         self.cathdu: int = args.hdu
         self.racolumn: str = args.racolumn
         self.decolumn: str = args.deccolumn
@@ -118,19 +129,21 @@ class SplusGaiaAst(object):
         self.clstar_column = args.clstar_column
         self.fwhm_column = args.fwhm_column
         self.sn_column = args.sn_column
-        self.filetype = args.filetype
         self.angle: float = args.angle
         self.sn_limit: float = args.sn_limit
         self.output: str = args.output
-        self.savefig: bool = args.savefig
         self.bins = args.bins
-        self.limit = args.limit
+        self.limit = args.limits
+        self.ncores = args.ncores
+        self.savefig: bool = args.savefig
         self.debug: bool = args.debug
         self.verbose: bool = args.verbose
+        self.clobber: bool = args.clobber
+
+        # other attributes
         self.logger = logging.getLogger(__name__)
         self.data_dict = {}
         self.foot_table = None
-        self.ncores = args.ncores
 
     def execute(self):
         """
@@ -199,9 +212,10 @@ class SplusGaiaAst(object):
         try:
             footprint = ascii.read(path_to_foot)
         except FileNotFoundError:
-            self.logger.error(
-                'Footprint file {} not found'.format(path_to_foot))
-            sys.exit(1)
+            self.logger.error(" - ".join([datetime.now().strftime(
+                '%Y-%m-%d %H:%M:%S'), 'Footprint file {} not found'.format(path_to_foot)]))
+            raise FileNotFoundError(
+                "Footprint file {} not found".format(path_to_foot))
 
         return footprint
 
@@ -280,10 +294,10 @@ class SplusGaiaAst(object):
             os.mkdir(results_dir)
 
         path_to_results = os.path.join(
-            results_dir, "".join([tile, '_gaiaDR_diff.csv']))
+            results_dir, " - ".join([tile, '_gaiaDR_diff.csv']))
         if os.path.isfile(path_to_results):
-            self.logger.info(
-                'Catalogue for tile %s already exists. Skipping calculation' % tile)
+            self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                         'Catalogue for tile %s already exists. Skipping calculation' % tile]))
             results = ascii.read(path_to_results, format='csv')
 
             return results
@@ -293,10 +307,11 @@ class SplusGaiaAst(object):
             tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
                 u.hour, u.deg), frame='icrs', equinox='J2000')
 
-            gaia_cat_path = os.path.join(workdir, "".join(
+            gaia_cat_path = os.path.join(workdir, " - ".join(
                 ['gaia_', gaia_dr, '/', tile, '.csv']))
             if os.path.isfile(gaia_cat_path):
-                self.logger.info('Reading gaia cat from database')
+                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             'Reading gaia cat from database']))
                 gaia_data = ascii.read(gaia_cat_path, format='csv')
             else:
                 gaia_data = self.get_gaia(tile_coords, tile)
@@ -305,15 +320,17 @@ class SplusGaiaAst(object):
             try:
                 scat = fits.open(os.path.join(workdir, self.data_dict[tile]))[
                     self.cathdu].data
-                self.logger.info('Catalogue is in FITS format. Reading hdu %s',
-                                 self.cathdu)
+                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             'Catalogue is in FITS format. Reading hdu %i',
+                                             self.cathdu]))
             except OSError:
                 scat = ascii.read(os.path.join(
                     workdir, self.data_dict[tile]))
-                self.logger.info('Catalogue is in CSV format')
+                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             'Catalogue is in CSV format']))
             except (UnicodeDecodeError, TypeError):
-                self.logger.error(
-                    'Filetype for input catalogue not supported. Use FITS or CSV')
+                self.logger.error(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                              'Filetype for input catalogue not supported. Use FITS or CSV']))
                 raise TypeError(
                     'Filetype for input catalogue not supported')
 
@@ -328,27 +345,27 @@ class SplusGaiaAst(object):
             sample = (scat[self.mag_column] > 14.)
             sample &= (scat[self.mag_column] < 19.)
             if self.flags_column is None:
-                self.logger.warning(
-                    'FLAGS column not available. Skipping using flags to object selection')
+                self.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                'FLAGS column not available. Skipping using flags to object selection']))
             else:
                 sample &= scat[self.flags_column] == 0
             if self.clstar_column is None:
-                self.logger.warning(
-                    'CLASS_STAR column not available. Skipping using CLASS_STAR to object selection')
+                self.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                'CLASS_STAR column not available. Skipping using CLASS_STAR to object selection']))
             else:
                 try:
                     sample &= scat[self.clstar_column] > 0.95
                 finally:
-                    self.logger.warning(
-                        'Column for CLASS_STAR not found. Ignoring')
+                    self.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                    'Column for CLASS_STAR not found. Ignoring']))
             if self.fwhm_column is None:
-                self.logger.warning(
-                    'FWHM column not available. Skipping using FWHM to object selection')
+                self.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                'FWHM column not available. Skipping using FWHM to object selection']))
             else:
                 sample &= scat[self.fwhm_column] * 3600 < 2.5
             if self.sn_column is None:
-                self.logger.warning(
-                    'SN column not available. Skipping using SN to object selection')
+                self.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                'SN column not available. Skipping using SN to object selection']))
             else:
                 sample &= scat[self.sn_column] > self.sn_limit
 
@@ -375,7 +392,8 @@ class SplusGaiaAst(object):
                  'dediff': dediff,
                  'abspm': abspm[mask]}
             results = pd.DataFrame(data=d)
-            self.logger.info('Saving results to %s' % path_to_results)
+            self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                         'Saving results to %s' % path_to_results]))
             results.to_csv(path_to_results, index=False)
 
             return results
@@ -411,7 +429,8 @@ class SplusGaiaAst(object):
         angle = self.angle
 
         # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
-        self.logger.info('Querying gaia/vizier')
+        self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                     'Querying gaia/vizier']))
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
                    catalog='I/' + str(gaia_dr))
         v.ROW_LIMIT = 999999999
@@ -421,28 +440,29 @@ class SplusGaiaAst(object):
             try:
                 os.makedirs(cache_path, exist_ok=True)
             except FileExistsError:
-                self.logger.info(
-                    "File %s already exists. Skipping", cache_path)
+                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             "File %s already exists. Skipping", cache_path]))
         v.cache_location = cache_path
         gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
         # mask all nan objects in the coordinates columns before saving the catalogue
         mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
         gaia_data = gaia_data[~mask]
-        self.logger.info('Gaia_data is %s', gaia_data)
+        self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                     'Gaia_data is %s', gaia_data]))
 
         # save Gaia's catalogue to workdir
-        gaia_cat_path = os.path.join(workdir, "".join(
+        gaia_cat_path = os.path.join(workdir, " - ".join(
             ['gaia_', gaia_dr, '_', tilename, '.csv']))
-        if not os.path.isdir(os.path.join(workdir, "".join(['gaia_', gaia_dr]))):
+        if not os.path.isdir(os.path.join(workdir, " - ".join(['gaia_', gaia_dr]))):
             try:
-                os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
+                os.mkdir(os.path.join(workdir, " - ".join(['gaia_', gaia_dr])))
             except FileExistsError:
-                self.logger.info("File %s already exists. Skipping",
-                                 os.path.join(workdir, "".join(['gaia_', gaia_dr])))
-
+                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             "File %s already exists. Skipping",
+                                             os.path.join(workdir, " - ".join(['gaia_', gaia_dr]))]))
         if self.verbose:
-            self.logger.info(
-                'Saving gaia catalogue to cache %s', gaia_cat_path)
+            self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                         'Saving gaia catalogue to cache %s', gaia_cat_path]))
         gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
 
         return gaia_data
@@ -481,9 +501,11 @@ def plot_diffs(datatab, args):
     abspm = data['abspm'][mask]
 
     percra = np.percentile(radiff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
-    logger.info('Percentiles for RA: %s' % percra)
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'Percentiles for RA: %s' % percra]))
     percde = np.percentile(dediff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
-    logger.info('Percentiles for DEC: %s' % percde)
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'Percentiles for DEC: %s' % percde]))
 
     left, width = 0.1, 0.6
     bottom, height = 0.1, 0.65
@@ -503,18 +525,22 @@ def plot_diffs(datatab, args):
     ax_histy.tick_params(direction='in', labelleft=False)
 
     lbl = r'$N = %i$' % len(radiff)
-    logger.info("Starting plot...")
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Starting plot..."]))
     sc = ax_scatter.scatter(radiff, dediff, c=abspm,
                             s=10, cmap='plasma', label=lbl)
-    logger.info("Finished scatter plot...")
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Finished scatter plot..."]))
     ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
                       fontsize=12)
     if contour:
-        logger.info("Calculatinig contours...")
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Calculatinig contours..."]))
         contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=[0.3, 4.55, 31.7],
                     colors=colours)
-        logger.info("Done!")
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Done!"]))
 
     cb = plt.colorbar(sc, ax=ax_histy, pad=.02)
     cb.set_label(r'$|\mu|\ \mathrm{[mas\,yr^{-1}]}$', fontsize=20)
@@ -528,7 +554,8 @@ def plot_diffs(datatab, args):
     plt.setp(ax_scatter.get_xticklabels(), fontsize=14)
     plt.setp(ax_scatter.get_yticklabels(), fontsize=14)
 
-    logger.info("Plotting histograms for the percentiles...")
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Plotting histograms for the percentiles...",]))
     ax_histx.axvline(percra[0], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[1], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[2], color='k', linestyle='dashed', lw=1, zorder=1)
@@ -545,20 +572,23 @@ def plot_diffs(datatab, args):
     ax_histy.axhline(percde[6], color='k', linestyle='dashed', lw=1, zorder=1)
 
     # build hists
-    logger.info("Building histograms...")
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Building histograms..."]))
     if radiff.size < 1000000:
         bins = np.arange(-lim, lim + binwidth, binwidth)
     else:
         bins = 1000
-    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
-                    r'$\sigma = %.3f$' % np.std(radiff)])
-    logger.info("Building RA histogram...")
+    xlbl = " - ".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
+                       r'$\sigma = %.3f$' % np.std(radiff)])
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Building RA histogram..."]))
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
-    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
-                    r'$\sigma = %.3f$' % np.std(dediff)])
-    logger.info("Building DEC histogram...")
+    ylbl = " - ".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
+                       r'$\sigma = %.3f$' % np.std(dediff)])
+    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "Building DEC histogram...",]))
     yx, yy, _ = ax_histy.hist(dediff, bins=bins, orientation='horizontal',
                               label=ylbl, alpha=0.8, zorder=10)
     ax_histy.legend(loc='upper right', handlelength=0, fontsize=12)
@@ -572,7 +602,8 @@ def plot_diffs(datatab, args):
 
     if savefig:
         figpath = datatab.split('.')[0] + '.png'
-        logger.info("Saving figure at %s" % figpath)
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Saving figure at %s" % figpath]))
         plt.savefig(figpath, format='png', dpi=360)
     showfig = True
     if showfig:
@@ -623,19 +654,23 @@ if __name__ == '__main__':
 
     list_of_matches = gasp.execute()
     if list_of_matches is None:
-        gasp.logger.error("No matches found. Exiting...")
+        gasp.logger.error(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      "No matches found. Exiting...",]))
         sys.exit(1)
     else:
         file_to_save = os.path.join(args.workdir, args.output)
         if os.path.isfile(file_to_save) and not args.clobber:
-            gasp.logger.warning("File %s already exists. Use --clobber to force overwrite." %
-                                file_to_save)
+            gasp.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                            "File %s already exists. Use --clobber to force overwrite." %
+                                            file_to_save]))
         else:
-            gasp.logger.info("Found %d matches. Starting staking" %
-                             len(list_of_matches))
+            gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                         "Found %d matches. Starting staking" %
+                             len(list_of_matches)]))
             # stack the results
             stacked_results = vstack(list_of_matches)
-            gasp.logger.info("Saving results to %s" % file_to_save)
+            gasr.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                         "Saving results to %s" % file_to_save]))
             stacked_results.write(file_to_save, format='csv', overwrite=True)
 
     datatab = os.path.join(args.workdir, args.output)
