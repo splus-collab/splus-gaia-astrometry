@@ -129,6 +129,109 @@ class SplusGaiaAst(object):
         self.debug: bool = args.debug
         self.verbose: bool = args.verbose
         self.logger = logging.getLogger(__name__)
+        self.data_dict = {}
+
+    def execute(self):
+        """
+        Execute the code
+        """
+        # Load the tiles to be used
+        fields = self.get_fields(self.tiles)
+
+        # loag the footprint
+        footprint = self.get_footprint()
+
+        # get field names in the footprint
+        field_names = self.get_fields_names(footprint)
+
+        # Load the data
+        self.data_dict = self.load_data(fields)
+
+        # calc gaia and splus astrometry difference
+        for tile in self.data_dict.keys():
+            self.calculate_astdiff(field_names, tile)
+
+    def get_fields(self):
+        """
+        Get the fields from the tiles
+
+        Parameters
+        ----------
+        tiles : str
+          Tiles to be used
+
+        Returns
+        -------
+        fields : list
+          List of fields
+        """
+        # read text file with the list of tiles to consider
+        textfile_path = os.path.join(gasp.workdir, gasp.tiles)
+        assert os.path.exists(textfile_path), 'File {} does not exist'.format(
+            textfile_path)
+        fields = pd.read_csv(textfile_path, sep=' ',
+                             header=None, names=['NAME'])
+
+        return fields
+
+    def get_footprint(self):
+        """
+        Get the footprint of the survey
+
+        Parameters
+        ----------
+        footprint : str
+            Path to the footprint file
+
+        Returns
+        -------
+        footprint : astropy Table
+            Table containing the footprint of the survey
+        """
+        path_to_foot = os.path.abspath(self.footprint)
+        try:
+            footprint = ascii.read(path_to_foot)
+        except FileNotFoundError:
+            self.logger.error(
+                'Footprint file {} not found'.format(path_to_foot))
+            sys.exit(1)
+
+        return footprint
+
+    def get_fields_names(self, footprint):
+        """
+        Get the names of the fields in the footprint and correct them is necessary
+        """
+
+        try:
+            field_names = np.array([n.replace('_', '-')
+                                    for n in footprint['NAME']])
+        except ValueError:
+            field_names = footprint['NAME']
+
+        return field_names
+
+    def load_data(self, fields):
+        """
+        Load the data from the tiles
+
+        Parameters
+        ----------
+        fields : list
+          List of fields
+
+        Returns
+        -------
+        data : list
+          List to tables inside indir
+        """
+        data_dict = {}
+        for item in os.listdir(self.datadir):
+            if item.split('.')[0] in fields:
+                data_dict[item.split('.')[0]] = os.path.join(
+                    self.datadir, item)
+
+        return data_dict
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
@@ -156,9 +259,9 @@ class SplusGaiaAst(object):
         gaia : Pandas DataFrame
             DataFrame containing the data queried around the given coordinates
         """
-        workdir = self.workdir if workdir is None else workdir
-        gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
-        angle = self.angle if angle is None else angle
+        workdir = self.workdir
+        gaia_dr = self.gaia_dr
+        angle = self.angle
 
         # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
         self.logger.info('Querying gaia/vizier')
@@ -197,8 +300,7 @@ class SplusGaiaAst(object):
 
         return gaia_data
 
-    def calculate_astdiff(self, footprint, field_names, workdir=None, gaia_dr=None, cat_name_preffix=None,
-                          cat_name_suffix=None):
+    def calculate_astdiff(self, field_names, tile):
         """
         Calculate the astrometric differences between any SPLUS catalogue as
         long as the columns are properly named
@@ -229,121 +331,110 @@ class SplusGaiaAst(object):
             Table containing the astrometric differences between the SPLUS catalogues and Gaia
         """
 
-        gaia_dr = self.gaia_dr if gaia_dr is None else gaia_dr
-        workdir = self.workdir if workdir is None else workdir
-        cat_name_preffix = self.cat_name_preffix if cat_name_preffix is None else cat_name_preffix
-        cat_name_suffix = self.cat_name_suffix if cat_name_suffix is None else cat_name_suffix
+        gaia_dr = self.gaia_dr
+        workdir = self.workdir
 
+        # create the results directory if it doesn't exist
         results_dir = os.path.join(workdir, 'results/')
         if not os.path.isdir(results_dir):
             os.mkdir(results_dir)
 
-        for tile in fields:
-            if tile == 'fakename':
-                self.logger.info('This is a filler name')
+        path_to_results = os.path.join(
+            results_dir, "".join([tile, '_gaiaDR_diff.csv']))
+        if os.path.isfile(path_to_results):
+            self.logger.info(
+                'Catalogue for tile %s already exists. Skipping' % tile)
+        else:
+            sra = footprint['RA'][field_names == tile]
+            sdec = footprint['DEC'][field_names == tile]
+            tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
+                u.hour, u.deg), frame='icrs', equinox='J2000')
+
+            gaia_cat_path = os.path.join(workdir, "".join(
+                ['gaia_', gaia_dr, '/', tile, '.csv']))
+            if os.path.isfile(gaia_cat_path):
+                self.logger.info('Reading gaia cat from database')
+                gaia_data = ascii.read(gaia_cat_path, format='csv')
             else:
-                path_to_results = os.path.join(
-                    results_dir, "".join([tile, '_mar-gaiaDR3_diff.csv']))
-                if os.path.isfile(path_to_results):
-                    self.logger.info(
-                        'Catalogue for tile %s already exists. Skipping' % tile)
-                else:
-                    sra = footprint['RA'][field_names == tile]
-                    sdec = footprint['DEC'][field_names == tile]
-                    tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
-                        u.hour, u.deg), frame='icrs', equinox='J2000')
+                gaia_data = self.get_gaia(tile_coords, tile)
 
-                    gaia_cat_path = os.path.join(workdir, "".join(
-                        ['gaia_', gaia_dr, '/', tile, '.csv']))
-                    if os.path.isfile(gaia_cat_path):
-                        self.logger.info('Reading gaia cat from database')
-                        gaia_data = ascii.read(gaia_cat_path, format='csv')
-                    else:
-                        gaia_data = self.get_gaia(tile_coords, tile)
+            # test if input catalogue is in FITS or CSV format
+            try:
+                scat = fits.open(os.path.join(workdir, self.datadir, self.data_dict[tile]))[
+                    self.cathdu].data
+                self.logger.info('Catalogue is in FITS format. Reading hdu %s',
+                                 self.cathdu)
+            except TypeError:
+                scat = pd.read_csv(os.path.join(
+                    workdir, self.datadir, self.data_dict[tile]))
+                self.logger.info('Catalogue is in CSV format')
+            else:
+                self.logger.error(
+                    'Filetype for input catalogue not supported. Use FITS or CSV')
+                raise TypeError(
+                    'Filetype for input catalogue not supported')
 
-                    if self.filetype == '.fits':
-                        try:
-                            scat = fits.open(os.path.join(
-                                workdir, "".join([cat_name_preffix, tile, cat_name_suffix])))[self.cathdu].data
-                        except TypeError:
-                            self.logger.error(
-                                'Catalogue is not in FITS format. Define the proper format of the default variable filetype')
-                            raise TypeError('Catalogue is not in FITS format')
-                    elif self.filetype == '.csv':
-                        try:
-                            scat = pd.read_csv(os.path.join(workdir,
-                                               "".join([cat_name_preffix, tile, cat_name_suffix])))
-                        except TypeError:
-                            self.logger.error(
-                                'Catalogue is not in CSV format. Define the proper format of the default variable filetype')
-                            raise TypeError('Catalogue is not in CSV format')
-                    else:
-                        self.logger.error(
-                            'Filetype for input catalogue not supported. Use FITS or CSV')
-                        raise TypeError(
-                            'Filetype for input catalogue not supported')
+            splus_coords = SkyCoord(
+                ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
+            gaia_coords = SkyCoord(
+                ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
+            idx, d2d, _ = splus_coords.match_to_catalog_3d(
+                gaia_coords)
+            separation = d2d < 5.0 * u.arcsec
 
-                    splus_coords = SkyCoord(
-                        ra=scat[self.racolumn], dec=scat[self.decolumn], unit=(u.deg, u.deg))
-                    gaia_coords = SkyCoord(
-                        ra=gaia_data['RAJ2000'], dec=gaia_data['DEJ2000'], unit=(u.deg, u.deg))
-                    idx, d2d, d3d = splus_coords.match_to_catalog_3d(
-                        gaia_coords)
-                    separation = d2d < 5.0 * u.arcsec
+            sample = (scat[self.mag_column] > 14.)
+            sample &= (scat[self.mag_column] < 19.)
+            if self.flags_column is None:
+                self.logger.warning(
+                    'FLAGS column not available. Skipping using flags to object selection')
+            else:
+                sample &= scat[self.flags_column] == 0
+            if self.clstar_column is None:
+                self.logger.warning(
+                    'CLASS_STAR column not available. Skipping using CLASS_STAR to object selection')
+            else:
+                try:
+                    sample &= scat[self.clstar_column] > 0.95
+                finally:
+                    self.logger.warning(
+                        'Column for CLASS_STAR not found. Ignoring')
+            if self.fwhm_column is None:
+                self.logger.warning(
+                    'FWHM column not available. Skipping using FWHM to object selection')
+            else:
+                sample &= scat[self.fwhm_column] * 3600 < 2.5
+            if self.sn_column is None:
+                self.logger.warning(
+                    'SN column not available. Skipping using SN to object selection')
+            else:
+                sample &= scat[self.sn_column] > self.sn_limit
 
-                    sample = (scat[self.mag_column] > 14.)
-                    sample &= (scat[self.mag_column] < 19.)
-                    if self.flags_column is None:
-                        self.logger.warning(
-                            'FLAGS column not available. Skipping using flags to object selection')
-                    else:
-                        sample &= scat[self.flags_column] == 0
-                    if self.clstar_column is None:
-                        self.logger.warning(
-                            'CLASS_STAR column not available. Skipping using CLASS_STAR to object selection')
-                    else:
-                        try:
-                            sample &= scat[self.clstar_column] > 0.95
-                        finally:
-                            self.logger.warning(
-                                'Column for CLASS_STAR not found. Ignoring')
-                    if self.fwhm_column is None:
-                        self.logger.warning(
-                            'FWHM column not available. Skipping using FWHM to object selection')
-                    else:
-                        sample &= scat[self.fwhm_column] * 3600 < 2.5
-                    if self.sn_column is None:
-                        self.logger.warning(
-                            'SN column not available. Skipping using SN to object selection')
-                    else:
-                        sample &= scat[self.sn_column] > self.sn_limit
+            finalscat = scat[separation & sample]
+            finalgaia = gaia_data[idx][separation & sample]
 
-                    finalscat = scat[separation & sample]
-                    finalgaia = gaia_data[idx][separation & sample]
+            abspm = abs(finalgaia['pmRA']) + abs(finalgaia['pmDE'])
+            # get masked values in gaia
+            mx = np.ma.masked_invalid(abspm)
+            lmt = np.percentile(abspm[~mx.mask], 95)
+            mask = (abspm < lmt) & ~mx.mask
+            dediff = 3600. * \
+                (finalscat[self.decolumn][mask]*u.deg -
+                 np.array(finalgaia['DEJ2000'])[mask]*u.deg)
+            # calculate splus - gaia ra
+            radiff = 3600 * (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) *\
+                np.cos(np.array(finalgaia['DEJ2000'])[mask] * u.deg)
 
-                    abspm = abs(finalgaia['pmRA']) + abs(finalgaia['pmDE'])
-                    # get masked values in gaia
-                    mx = np.ma.masked_invalid(abspm)
-                    lmt = np.percentile(abspm[~mx.mask], 95)
-                    mask = (abspm < lmt) & ~mx.mask
-                    dediff = 3600. * \
-                        (finalscat[self.decolumn][mask]*u.deg -
-                         np.array(finalgaia['DEJ2000'])[mask]*u.deg)
-                    # calculate splus - gaia ra
-                    radiff = 3600 * (finalscat[self.racolumn][mask] - finalgaia['RAJ2000'][mask]) *\
-                        np.cos(np.array(finalgaia['DEJ2000'])[mask] * u.deg)
-
-                    d = {'RA': finalscat[self.racolumn][mask],
-                         'DEC': finalscat[self.decolumn][mask],
-                         'RAJ2000': finalgaia['RAJ2000'][mask],
-                         'DEJ2000': finalgaia['DEJ2000'][mask],
-                         'radiff': radiff,
-                         'dediff': dediff,
-                         'abspm': abspm[mask]}
-                    results = pd.DataFrame(data=d)
-                    self.logger.info('saving results to %s' % path_to_results)
-                    print('saving results to', path_to_results)
-                    results.to_csv(path_to_results, index=False)
+            d = {'RA': finalscat[self.racolumn][mask],
+                 'DEC': finalscat[self.decolumn][mask],
+                 'RAJ2000': finalgaia['RAJ2000'][mask],
+                 'DEJ2000': finalgaia['DEJ2000'][mask],
+                 'radiff': radiff,
+                 'dediff': dediff,
+                 'abspm': abspm[mask]}
+            results = pd.DataFrame(data=d)
+            self.logger.info('saving results to %s' % path_to_results)
+            print('saving results to', path_to_results)
+            results.to_csv(path_to_results, index=False)
 
         return
 
@@ -507,44 +598,6 @@ def call_logger():
     logger.addHandler(ch)
 
 
-def get_footprint(foot_path, logger):
-    """
-    Get the footprint of the survey
-
-    Parameters
-    ----------
-    footprint : str
-        Path to the footprint file
-
-    Returns
-    -------
-    footprint : astropy Table
-        Table containing the footprint of the survey
-    """
-    path_to_foot = os.path.abspath(foot_path)
-    try:
-        footprint = ascii.read(path_to_foot)
-    except FileNotFoundError:
-        logger.error('Footprint file {} not found'.format(path_to_foot))
-        sys.exit(1)
-
-    return footprint
-
-
-def get_fields_names(footprint):
-    """
-    Get the names of the fields in the footprint and correct them is necessary
-    """
-
-    try:
-        field_names = np.array([n.replace('_', '-')
-                                for n in footprint['NAME']])
-    except ValueError:
-        field_names = footprint['NAME']
-
-    return field_names
-
-
 if __name__ == '__main__':
     call_logger()
     # get the path where the code resides
@@ -553,13 +606,6 @@ if __name__ == '__main__':
     args = parser()
     gasp = SplusGaiaAst(args)
     gasp.datadir = args.datadir if args.datadir is not None else args.workdir
-
-    # read text file with the list of tiles to consider
-    textfile_path = os.path.join(gasp.workdir, gasp.tiles)
-    assert os.path.exists(textfile_path), 'File {} does not exist'.format(
-        textfile_path)
-    fields = pd.read_csv(textfile_path, sep=' ',
-                         header=None, names=['NAME'])
 
     # get the footprint of the survey
     footprint = get_footprint(args.footprint, logging.getLogger(__name__))
