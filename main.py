@@ -106,6 +106,7 @@ class SplusGaiaAst(object):
 
     def __init__(self, args):
         self.tiles: str = args.tiles
+        self.footprint: str = args.footprint
         self.workdir: str = args.workdir
         self.datadir: str = args.datadir
         self.gaia_dr = args.gaia_dr
@@ -136,20 +137,26 @@ class SplusGaiaAst(object):
         Execute the code
         """
         # Load the tiles to be used
-        fields = self.get_fields(self.tiles)
+        print('Loading tiles')
+        fields = self.get_fields()
 
         # loag the footprint
+        print('Loading footprint')
         footprint = self.get_footprint()
 
         # get field names in the footprint
-        field_names = self.get_fields_names(footprint)
+        # print('Getting footprint field names')
+        # field_names = self.get_fields_names(footprint)
 
         # Load the data
+        print('Loading data')
         self.data_dict = self.load_data(fields)
 
         # calc gaia and splus astrometry difference
-        for tile in self.data_dict.keys():
-            self.calculate_astdiff(field_names, tile)
+        print('Calculating astrometry difference')
+        for tile in list(self.data_dict.keys())[0:1]:
+            print('Tile {}'.format(tile))
+            self.calculate_astdiff(footprint, tile)
 
     def get_fields(self):
         """
@@ -166,7 +173,7 @@ class SplusGaiaAst(object):
           List of fields
         """
         # read text file with the list of tiles to consider
-        textfile_path = os.path.join(gasp.workdir, gasp.tiles)
+        textfile_path = os.path.join(self.workdir, self.tiles)
         assert os.path.exists(textfile_path), 'File {} does not exist'.format(
             textfile_path)
         fields = pd.read_csv(textfile_path, sep=' ',
@@ -227,80 +234,13 @@ class SplusGaiaAst(object):
         """
         data_dict = {}
         for item in os.listdir(self.datadir):
-            if item.split('.')[0] in fields:
+            if item.split('.')[0] in fields['NAME'].values:
                 data_dict[item.split('.')[0]] = os.path.join(
                     self.datadir, item)
 
         return data_dict
 
-    def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
-        """
-        Query Gaia photometry available at Vizier around a given centre.
-
-        Parameters
-        ----------
-        tile_coords : SkyCoord object
-          Central coordinates of the catalogue
-
-        tilename : string
-          Name of the central tile to use to search for the individual catalogues
-
-        workdir : string
-          Workdir path. Default is None
-
-        gaia_dr : str | float
-          Gaia's catalogue number as registered at Vizier
-
-        angle : float
-          Radius to search around the central coordinates through Gaia's catalogue in Vizier
-
-        Returns
-        -------
-        gaia : Pandas DataFrame
-            DataFrame containing the data queried around the given coordinates
-        """
-        workdir = self.workdir
-        gaia_dr = self.gaia_dr
-        angle = self.angle
-
-        # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
-        self.logger.info('Querying gaia/vizier')
-        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
-                   catalog='I/' + str(gaia_dr))
-        v.ROW_LIMIT = 999999999
-        # change cache location to workdir path to avoid $HOME overfill
-        cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
-        if not os.path.isdir(cache_path):
-            try:
-                os.makedirs(cache_path, exist_ok=True)
-            except FileExistsError:
-                self.logger.info(
-                    "File %s already exists. Skipping", cache_path)
-        v.cache_location = cache_path
-        gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
-        # mask all nan objects in the coordinates columns before saving the catalogue
-        mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
-        gaia_data = gaia_data[~mask]
-        logger.info('Gaia_data is %s', gaia_data)
-
-        # save Gaia's catalogue to workdir
-        gaia_cat_path = os.path.join(workdir, "".join(
-            ['gaia_', gaia_dr, '_', tilename, '.csv']))
-        if not os.path.isdir(os.path.join(workdir, "".join(['gaia_', gaia_dr]))):
-            try:
-                os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
-            except FileExistsError:
-                self.logger.info("File %s already exists. Skipping",
-                                 os.path.join(workdir, "".join(['gaia_', gaia_dr])))
-
-        if self.verbose:
-            self.logger.info(
-                'Saving gaia catalogue to cache %s', gaia_cat_path)
-        gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
-
-        return gaia_data
-
-    def calculate_astdiff(self, field_names, tile):
+    def calculate_astdiff(self, footprint, tile):
         """
         Calculate the astrometric differences between any SPLUS catalogue as
         long as the columns are properly named
@@ -345,8 +285,8 @@ class SplusGaiaAst(object):
             self.logger.info(
                 'Catalogue for tile %s already exists. Skipping' % tile)
         else:
-            sra = footprint['RA'][field_names == tile]
-            sdec = footprint['DEC'][field_names == tile]
+            sra = footprint['RA'][footprint['NAME'] == tile]
+            sdec = footprint['DEC'][footprint['NAME'] == tile]
             tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
                 u.hour, u.deg), frame='icrs', equinox='J2000')
 
@@ -360,15 +300,15 @@ class SplusGaiaAst(object):
 
             # test if input catalogue is in FITS or CSV format
             try:
-                scat = fits.open(os.path.join(workdir, self.datadir, self.data_dict[tile]))[
+                scat = fits.open(os.path.join(workdir, self.data_dict[tile]))[
                     self.cathdu].data
                 self.logger.info('Catalogue is in FITS format. Reading hdu %s',
                                  self.cathdu)
-            except TypeError:
+            except OSError:
                 scat = pd.read_csv(os.path.join(
-                    workdir, self.datadir, self.data_dict[tile]))
+                    workdir, self.data_dict[tile]))
                 self.logger.info('Catalogue is in CSV format')
-            else:
+            except (UnicodeDecodeError, TypeError):
                 self.logger.error(
                     'Filetype for input catalogue not supported. Use FITS or CSV')
                 raise TypeError(
@@ -432,11 +372,77 @@ class SplusGaiaAst(object):
                  'dediff': dediff,
                  'abspm': abspm[mask]}
             results = pd.DataFrame(data=d)
-            self.logger.info('saving results to %s' % path_to_results)
-            print('saving results to', path_to_results)
+            self.logger.info('Saving results to %s' % path_to_results)
             results.to_csv(path_to_results, index=False)
 
         return
+
+    def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
+        """
+        Query Gaia photometry available at Vizier around a given centre.
+
+        Parameters
+        ----------
+        tile_coords : SkyCoord object
+          Central coordinates of the catalogue
+
+        tilename : string
+          Name of the central tile to use to search for the individual catalogues
+
+        workdir : string
+          Workdir path. Default is None
+
+        gaia_dr : str | float
+          Gaia's catalogue number as registered at Vizier
+
+        angle : float
+          Radius to search around the central coordinates through Gaia's catalogue in Vizier
+
+        Returns
+        -------
+        gaia : Pandas DataFrame
+            DataFrame containing the data queried around the given coordinates
+        """
+        workdir = self.workdir
+        gaia_dr = self.gaia_dr
+        angle = self.angle
+
+        # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
+        self.logger.info('Querying gaia/vizier')
+        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
+                   catalog='I/' + str(gaia_dr))
+        v.ROW_LIMIT = 999999999
+        # change cache location to workdir path to avoid $HOME overfill
+        cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
+        if not os.path.isdir(cache_path):
+            try:
+                os.makedirs(cache_path, exist_ok=True)
+            except FileExistsError:
+                self.logger.info(
+                    "File %s already exists. Skipping", cache_path)
+        v.cache_location = cache_path
+        gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
+        # mask all nan objects in the coordinates columns before saving the catalogue
+        mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
+        gaia_data = gaia_data[~mask]
+        self.logger.info('Gaia_data is %s', gaia_data)
+
+        # save Gaia's catalogue to workdir
+        gaia_cat_path = os.path.join(workdir, "".join(
+            ['gaia_', gaia_dr, '_', tilename, '.csv']))
+        if not os.path.isdir(os.path.join(workdir, "".join(['gaia_', gaia_dr]))):
+            try:
+                os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
+            except FileExistsError:
+                self.logger.info("File %s already exists. Skipping",
+                                 os.path.join(workdir, "".join(['gaia_', gaia_dr])))
+
+        if self.verbose:
+            self.logger.info(
+                'Saving gaia catalogue to cache %s', gaia_cat_path)
+        gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
+
+        return gaia_data
 
 
 def plot_diffs(datatab, contour=False, colours=None, savefig=False):
@@ -607,11 +613,7 @@ if __name__ == '__main__':
     gasp = SplusGaiaAst(args)
     gasp.datadir = args.datadir if args.datadir is not None else args.workdir
 
-    # get the footprint of the survey
-    footprint = get_footprint(args.footprint, logging.getLogger(__name__))
-    # get the names of the fields in the footprint
-    field_names = get_fields_names(footprint)
-
+    gasp.execute()
     sys.exit()
     # calculate to all tiles at once
     num_procs = 8
