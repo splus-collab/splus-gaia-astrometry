@@ -17,13 +17,14 @@ import os
 import sys
 import numpy as np
 from astropy.io import ascii, fits
+from astropy.table import vstack
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy.coordinates import Angle
 from astroquery.vizier import Vizier
 import pandas as pd
 import matplotlib.pyplot as plt
-import multiprocessing
+import multiprocessing as mp
 import time
 import glob
 import argparse
@@ -87,10 +88,14 @@ def parser():
                         help='Number of bins in the histogram. Default is 1000')
     parser.add_argument('-l', '--limit', type=float, default=0.5,
                         help='Limit of the histogram. Default is 0.5')
+    parser.add_argument('-nc', '--ncores', type=int, default=1,
+                        help='Number of cores to be used. Default is 1')
     parser.add_argument('--debug', action='store_true',
                         help='Prints out the debug of the code. Default is False')
-    parser.add_argument('-v', '--verbose', action='store_true',
+    parser.add_argument('-vv', '--verbose', action='store_true',
                         help='Prints out the progress of the code. Default is False')
+    parser.add_argument('--clobber', action='store_true',
+                        help='Overwrite the output file. Default is False')
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -131,32 +136,34 @@ class SplusGaiaAst(object):
         self.verbose: bool = args.verbose
         self.logger = logging.getLogger(__name__)
         self.data_dict = {}
+        self.foot_table = None
+        self.ncores = args.ncores
 
     def execute(self):
         """
         Execute the code
         """
         # Load the tiles to be used
-        print('Loading tiles')
         fields = self.get_fields()
 
         # loag the footprint
-        print('Loading footprint')
-        footprint = self.get_footprint()
+        self.foot_table = self.get_footprint()
 
         # get field names in the footprint
         # print('Getting footprint field names')
         # field_names = self.get_fields_names(footprint)
 
         # Load the data
-        print('Loading data')
         self.data_dict = self.load_data(fields)
 
-        # calc gaia and splus astrometry difference
-        print('Calculating astrometry difference')
-        for tile in list(self.data_dict.keys())[0:1]:
-            print('Tile {}'.format(tile))
-            self.calculate_astdiff(footprint, tile)
+        # calc gaia and splus astrometry difference using ncores to parallelize
+        # print('Calculating astrometry difference')
+        pool = mp.Pool(processes=self.ncores)
+        splus_gaia_astdiff = pool.map(
+            self.calculate_astdiff, list(self.data_dict.keys()))
+        pool.close()
+        pool.join()
+        return splus_gaia_astdiff
 
     def get_fields(self):
         """
@@ -240,7 +247,7 @@ class SplusGaiaAst(object):
 
         return data_dict
 
-    def calculate_astdiff(self, footprint, tile):
+    def calculate_astdiff(self, tile):
         """
         Calculate the astrometric differences between any SPLUS catalogue as
         long as the columns are properly named
@@ -283,10 +290,13 @@ class SplusGaiaAst(object):
             results_dir, "".join([tile, '_gaiaDR_diff.csv']))
         if os.path.isfile(path_to_results):
             self.logger.info(
-                'Catalogue for tile %s already exists. Skipping' % tile)
+                'Catalogue for tile %s already exists. Skipping calculation' % tile)
+            results = ascii.read(path_to_results, format='csv')
+
+            return results
         else:
-            sra = footprint['RA'][footprint['NAME'] == tile]
-            sdec = footprint['DEC'][footprint['NAME'] == tile]
+            sra = self.foot_table['RA'][self.foot_table['NAME'] == tile]
+            sdec = self.foot_table['DEC'][self.foot_table['NAME'] == tile]
             tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
                 u.hour, u.deg), frame='icrs', equinox='J2000')
 
@@ -305,7 +315,7 @@ class SplusGaiaAst(object):
                 self.logger.info('Catalogue is in FITS format. Reading hdu %s',
                                  self.cathdu)
             except OSError:
-                scat = pd.read_csv(os.path.join(
+                scat = ascii.read(os.path.join(
                     workdir, self.data_dict[tile]))
                 self.logger.info('Catalogue is in CSV format')
             except (UnicodeDecodeError, TypeError):
@@ -375,7 +385,7 @@ class SplusGaiaAst(object):
             self.logger.info('Saving results to %s' % path_to_results)
             results.to_csv(path_to_results, index=False)
 
-        return
+            return results
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
@@ -542,13 +552,13 @@ def plot_diffs(datatab, contour=False, colours=None, savefig=False):
         bins = np.arange(-lim, lim + binwidth, binwidth)
     else:
         bins = 1000
-    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3].value, '\n',
+    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
                     r'$\sigma = %.3f$' % np.std(radiff)])
     logger.info("Building RA histogram...")
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
-    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3].value, '\n',
+    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
                     r'$\sigma = %.3f$' % np.std(dediff)])
     logger.info("Building DEC histogram...")
     yx, yy, _ = ax_histy.hist(dediff, bins=bins, orientation='horizontal',
@@ -613,66 +623,22 @@ if __name__ == '__main__':
     gasp = SplusGaiaAst(args)
     gasp.datadir = args.datadir if args.datadir is not None else args.workdir
 
-    gasp.execute()
-    sys.exit()
-    # calculate to all tiles at once
-    num_procs = 8
-    b = list(fields['NAME'])
-    if num_procs == 1:
-        num_fields = np.unique(b).size
-        if num_fields % num_procs > 0:
-            print('reprojecting', num_fields, 'fields')
-            increase_to = int(num_fields / num_procs) + 1
-            i = 0
-            while i < (increase_to * num_procs - num_fields):
-                b.append('fakename')
-                i += 1
-            else:
-                print(num_fields, 'already fulfill the conditions')
-        tiles = np.array(b).reshape(
-            (num_procs, int(np.array(b).size / num_procs)))
-        print('calculating for a total of', tiles.size, 'fields')
-        jobs = []
-        print('creating', num_procs, 'jobs...')
-        for tile in tiles:
-            process = multiprocessing.Process(
-                target=gasp.calculate_astdiff, args=(tile, footprint))
-            jobs.append(process)
+    list_of_matches = gasp.execute()
+    if list_of_matches is None:
+        gasp.logger.error("No matches found. Exiting...")
+        sys.exit(1)
+    else:
+        gasp.logger.info("Found %d matches. Starting staking" %
+                         len(list_of_matches))
+        # stack the results
+        stacked_results = vstack(list_of_matches)
+        gasp.logger.info("Saving results to %s" %
+                         os.path.join(args.workdir, 'results_stacked.csv'))
+        stacked_results.write(os.path.join(
+            args.workdir, 'results_stacked.csv'), overwrite=True)
 
-        # start jobs
-        print('starting', num_procs, 'jobs!')
-        for j in jobs:
-            j.start()
+    datatab = os.path.join(args.workdir, 'results_stacked.csv')
 
-        # check if any of the jobs initialized previously still alive
-        # save resulting table after all are finished
-        proc_alive = True
-        while proc_alive:
-            if any(proces.is_alive() for proces in jobs):
-                proc_alive = True
-                time.sleep(1)
-            else:
-                print('All jobs finished')
-                proc_alive = False
-
-        print('Done!')
-
-    if make_plot:
-        # to run only after finished all stacking
-        # datatab = workdir + 'results/results_stacked.csv'
-        datatab = os.path.join(
-            workdir, 'mar-astrometry_results_stacked.csv')
-        if not os.path.isfile(datatab):
-            list_results = glob.glob(
-                workdir + 'results/*_mar-gaiaDR3_diff.csv')
-            new_tab = pd.read_csv(list_results[0])
-            for tab in list_results[1:]:
-                print('stacking tab', tab, '...')
-                t = pd.read_csv(tab)
-                new_tab = pd.concat([new_tab, t], axis=0)
-            print('saving results to', datatab)
-            new_tab.to_csv(datatab, index=False)
-
-        print('running plot module for table', datatab)
-        plot_diffs(datatab, contour=False, colours=[
-                   'limegreen', 'yellowgreen', 'c'], savefig=True)
+    print('running plot module for table', datatab)
+    plot_diffs(datatab, contour=False, colours=[
+               'limegreen', 'yellowgreen', 'c'], savefig=False)
