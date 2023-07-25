@@ -81,8 +81,8 @@ def parser():
                         help='Column name of the fwhm in the catalogue. Default is None')
     parser.add_argument('-sn', '--sn_column', type=str, default=None,
                         help='Column name of the sn in the catalogue. Default is None')
-    parser.add_argument('-a', '--angle', type=float, default=5.0,
-                        help='Angle to be used in the crossmatch between Gaia and S-PLUS. Default is 5.0 arcsec')
+    parser.add_argument('-a', '--angle', type=float, default=1.0,
+                        help='Radius to search Gaia around the tile centre. Default is 1.0 deg')
     parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
                         help='Signal-to-noise lower limit to be used in the crossmatch. Default is 10.0')
     parser.add_argument('-o', '--output', type=str, default='results_stacked.csv',
@@ -93,6 +93,10 @@ def parser():
                         help='Limit of the histogram. Default is 0.5')
     parser.add_argument('-nc', '--ncores', type=int, default=1,
                         help='Number of cores to be used. Default is 1')
+    parser.add_argument('--contour', action='store_true',
+                        help='Plot the contour of the PDF. Default is False')
+    parser.add_argument('--colours', type=list, default=['limegreen', 'yellowgreen', 'c'],
+                        help="Colours of the histograms. Default is ['limegreen', 'yellowgreen', 'c']")
     parser.add_argument('-sf', '--savefig', action='store_true',
                         help='Save the figure. Default is False')
     parser.add_argument('--debug', action='store_true',
@@ -156,14 +160,12 @@ class SplusGaiaAst(object):
         self.foot_table = self.get_footprint()
 
         # get field names in the footprint
-        # print('Getting footprint field names')
         # field_names = self.get_fields_names(footprint)
 
         # Load the data
         self.data_dict = self.load_data(fields)
 
         # calc gaia and splus astrometry difference using ncores to parallelize
-        # print('Calculating astrometry difference')
         pool = mp.Pool(processes=self.ncores)
         splus_gaia_astdiff = pool.map(
             self.calculate_astdiff, list(self.data_dict.keys()))
@@ -261,23 +263,8 @@ class SplusGaiaAst(object):
 
         Parameters
         ----------
-        fields : list
-          List of the tiles to be processed
-
-        footprint : astropy Table
-            Table containing the footprint of the survey
-
-        workdir : string
-            Workdir path. Default is None
-
-        gaia_dr : str | float
-            Gaia's catalogue number as registered at Vizier
-
-        cat_name_preffix : str
-            Preffix to be added to the name of the catalogue. Default is None
-
-        cat_name_suffix : str
-            Suffix to be added to the name of the catalogue. Default is None
+        tile : str
+            Name of the tile
 
         Returns
         -------
@@ -293,8 +280,7 @@ class SplusGaiaAst(object):
         if not os.path.isdir(results_dir):
             os.mkdir(results_dir)
 
-        path_to_results = os.path.join(
-            results_dir, " - ".join([tile, '_gaiaDR_diff.csv']))
+        path_to_results = os.path.join(results_dir, "".join([tile, '_gaiaDR_diff.csv']))
         if os.path.isfile(path_to_results):
             self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                          'Catalogue for tile %s already exists. Skipping calculation' % tile]))
@@ -307,8 +293,7 @@ class SplusGaiaAst(object):
             tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
                 u.hour, u.deg), frame='icrs', equinox='J2000')
 
-            gaia_cat_path = os.path.join(workdir, " - ".join(
-                ['gaia_', gaia_dr, '/', tile, '.csv']))
+            gaia_cat_path = os.path.join(workdir, "".join(['gaia_', gaia_dr, '/', tile, '.csv']))
             if os.path.isfile(gaia_cat_path):
                 self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                              'Reading gaia cat from database']))
@@ -321,8 +306,7 @@ class SplusGaiaAst(object):
                 scat = fits.open(os.path.join(workdir, self.data_dict[tile]))[
                     self.cathdu].data
                 self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                             'Catalogue is in FITS format. Reading hdu %i',
-                                             self.cathdu]))
+                                             'Catalogue is in FITS format. Reading hdu %i' % self.cathdu]))
             except OSError:
                 scat = ascii.read(os.path.join(
                     workdir, self.data_dict[tile]))
@@ -424,13 +408,13 @@ class SplusGaiaAst(object):
         gaia : Pandas DataFrame
             DataFrame containing the data queried around the given coordinates
         """
-        workdir = self.workdir
-        gaia_dr = self.gaia_dr
-        angle = self.angle
+        workdir = workdir if self.workdir is None else self.workdir
+        gaia_dr = gaia_dr if self.gaia_dr is None else self.gaia_dr
+        angle = angle if self.angle is None else self.angle
 
         # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
         self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                     'Querying gaia/vizier']))
+                                     'Querying gaia/vizier for tile %s' % tilename]))
         v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
                    catalog='I/' + str(gaia_dr))
         v.ROW_LIMIT = 999999999
@@ -447,19 +431,19 @@ class SplusGaiaAst(object):
         # mask all nan objects in the coordinates columns before saving the catalogue
         mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
         gaia_data = gaia_data[~mask]
-        self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                     'Gaia_data is %s', gaia_data]))
+        if self.verbose:
+            print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  'Gaia_data is %s' % gaia_data)
 
         # save Gaia's catalogue to workdir
-        gaia_cat_path = os.path.join(workdir, " - ".join(
-            ['gaia_', gaia_dr, '_', tilename, '.csv']))
+        gaia_cat_path = os.path.join(workdir, "".join(['gaia_', gaia_dr, '/', tilename, '_gaiacat.csv']))
         if not os.path.isdir(os.path.join(workdir, " - ".join(['gaia_', gaia_dr]))):
             try:
-                os.mkdir(os.path.join(workdir, " - ".join(['gaia_', gaia_dr])))
+                os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
             except FileExistsError:
                 self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                              "File %s already exists. Skipping",
-                                             os.path.join(workdir, " - ".join(['gaia_', gaia_dr]))]))
+                                             os.path.join(workdir, "".join(['gaia_', gaia_dr]))]))
         if self.verbose:
             self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                          'Saving gaia catalogue to cache %s', gaia_cat_path]))
@@ -669,12 +653,12 @@ if __name__ == '__main__':
                              len(list_of_matches)]))
             # stack the results
             stacked_results = vstack(list_of_matches)
-            gasr.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                          "Saving results to %s" % file_to_save]))
             stacked_results.write(file_to_save, format='csv', overwrite=True)
 
     datatab = os.path.join(args.workdir, args.output)
 
-    print('running plot module for table', datatab)
-    plot_diffs(datatab, contour=False, colours=[
-               'limegreen', 'yellowgreen', 'c'], savefig=args.savefig)
+    gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                     'Running plot module for table', datatab]))
+    plot_diffs(datatab, args)
