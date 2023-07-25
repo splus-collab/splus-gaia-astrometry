@@ -12,7 +12,6 @@
 # 2023-07-04: Changing parameters to run MAR columns
 #
 
-from statspack.statspack import contour_pdf
 import os
 import sys
 import numpy as np
@@ -30,6 +29,7 @@ import argparse
 import logging
 import colorlog
 import git
+from statspack.statspack import contour_pdf
 
 __author__ = 'Fabio R Herpich'
 __email__ = 'fabio.herpich@ast.cam.ac.uk'
@@ -97,6 +97,9 @@ def parser():
                         help='Plot the contour of the PDF. Default is False')
     parser.add_argument('--colours', type=list, default=['limegreen', 'yellowgreen', 'c'],
                         help="Colours of the histograms. Default is ['limegreen', 'yellowgreen', 'c']")
+    # add option to include a list of percentiles as argument
+    parser.add_argument('--percents', type=str, default=[16, 50, 84],
+                        help="Percentiles of the contours (include the values without space separator). Default is [16,50,84]")
     parser.add_argument('-sf', '--savefig', action='store_true',
                         help='Save the figure. Default is False')
     parser.add_argument('--debug', action='store_true',
@@ -280,7 +283,8 @@ class SplusGaiaAst(object):
         if not os.path.isdir(results_dir):
             os.mkdir(results_dir)
 
-        path_to_results = os.path.join(results_dir, "".join([tile, '_gaiaDR_diff.csv']))
+        path_to_results = os.path.join(
+            results_dir, "".join([tile, '_gaiaDR_diff.csv']))
         if os.path.isfile(path_to_results):
             self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                          'Catalogue for tile %s already exists. Skipping calculation' % tile]))
@@ -293,7 +297,8 @@ class SplusGaiaAst(object):
             tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
                 u.hour, u.deg), frame='icrs', equinox='J2000')
 
-            gaia_cat_path = os.path.join(workdir, "".join(['gaia_', gaia_dr, '/', tile, '.csv']))
+            gaia_cat_path = os.path.join(workdir, "".join(
+                ['gaia_', gaia_dr, '/', tile, '.csv']))
             if os.path.isfile(gaia_cat_path):
                 self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                              'Reading gaia cat from database']))
@@ -436,7 +441,8 @@ class SplusGaiaAst(object):
                   'Gaia_data is %s' % gaia_data)
 
         # save Gaia's catalogue to workdir
-        gaia_cat_path = os.path.join(workdir, "".join(['gaia_', gaia_dr, '/', tilename, '_gaiacat.csv']))
+        gaia_cat_path = os.path.join(workdir, "".join(
+            ['gaia_', gaia_dr, '/', tilename, '_gaiacat.csv']))
         if not os.path.isdir(os.path.join(workdir, " - ".join(['gaia_', gaia_dr]))):
             try:
                 os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
@@ -468,13 +474,15 @@ def plot_diffs(datatab, args):
         If True, saves the figure.
     """
     contour = args.contour
+    percents = [float(x) for x in args.percents.strip('[]').split(',')]
     colours = args.colours
     savefig = args.savefig
     bins = args.bins
     limits = args.limits
 
     call_logger()
-    logger = logging.getLogger(__name__)
+    # configure logger for this module
+    logger = logging.getLogger('plot_diffs')
 
     data = pd.read_csv(datatab)
     mask = (data['radiff'] > -10) & (data['radiff'] < 10)
@@ -521,8 +529,8 @@ def plot_diffs(datatab, args):
     if contour:
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Calculatinig contours..."]))
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100, percent=[0.3, 4.55, 31.7],
-                    colors=colours)
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100,
+                    percent=percents, colors=colours)
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Done!"]))
 
@@ -562,15 +570,15 @@ def plot_diffs(datatab, args):
         bins = np.arange(-lim, lim + binwidth, binwidth)
     else:
         bins = 1000
-    xlbl = " - ".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
-                       r'$\sigma = %.3f$' % np.std(radiff)])
+    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
+                    r'$\sigma = %.3f$' % np.std(radiff)])
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "Building RA histogram..."]))
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
-    ylbl = " - ".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
-                       r'$\sigma = %.3f$' % np.std(dediff)])
+    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
+                    r'$\sigma = %.3f$' % np.std(dediff)])
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "Building DEC histogram...",]))
     yx, yy, _ = ax_histy.hist(dediff, bins=bins, orientation='horizontal',
