@@ -5,12 +5,6 @@
 # GitHub: herpichfr
 # ORCID: 0000-0001-7907-7884
 # ---
-# 2023-01-12: Adding multiprocessing to speed up the process
-# 2023-01-13: Adding a function to calculate the astrometric differences between any SPLUS catalogue as long as the
-# columns are properly named
-# ---
-# 2023-07-04: Changing parameters to run MAR columns
-#
 
 import os
 import sys
@@ -29,7 +23,7 @@ import argparse
 import logging
 import colorlog
 import git
-from statspack.statspack import contour_pdf
+from statspack import contour_pdf
 
 __author__ = 'Fabio R Herpich'
 __email__ = 'fabio.herpich@ast.cam.ac.uk'
@@ -97,7 +91,6 @@ def parser():
                         help='Plot the contour of the PDF. Default is False')
     parser.add_argument('--colours', type=list, default=['limegreen', 'yellowgreen', 'c'],
                         help="Colours of the histograms. Default is ['limegreen', 'yellowgreen', 'c']")
-    # add option to include a list of percentiles as argument
     parser.add_argument('--percents', type=str, default=[16, 50, 84],
                         help="Percentiles of the contours (include the values without space separator). Default is [16,50,84]")
     parser.add_argument('-sf', '--savefig', action='store_true',
@@ -161,9 +154,6 @@ class SplusGaiaAst(object):
 
         # loag the footprint
         self.foot_table = self.get_footprint()
-
-        # get field names in the footprint
-        # field_names = self.get_fields_names(footprint)
 
         # Load the data
         self.data_dict = self.load_data(fields)
@@ -529,7 +519,7 @@ def plot_diffs(datatab, args):
     if contour:
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Calculatinig contours..."]))
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=100,
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=200,
                     percent=percents, colors=colours)
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Done!"]))
@@ -608,7 +598,6 @@ def plot_diffs(datatab, args):
 
 def call_logger():
     """Configure the logger."""
-    # reset logging config
     logging.shutdown()
     logging.root.handlers.clear()
 
