@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # This module is meant to calculate the differences between the astrometry from S-PLUS to that
 # of Gaia DR2 or DR3
 # 2022-01-08: Expanding to compare any given photometric catalogue with Gaia
@@ -91,9 +92,11 @@ def parser():
                         help='Plot the contour of the PDF. Default is False')
     parser.add_argument('--colours', type=list, default=['limegreen', 'yellowgreen', 'c'],
                         help="Colours of the histograms. Default is ['limegreen', 'yellowgreen', 'c']")
-    parser.add_argument('--percents', type=str, default=[16, 50, 84],
-                        help="Percentiles of the contours (include the values without space separator). Default is [16,50,84]")
+    parser.add_argument('--percents', type=str, default='[0.3,4.5,32]',
+                        help="Percentiles of the contours (include the values without space separator). Default is 3, 2 and 1 sigma, or '[0.3,4.5,32]'")
     parser.add_argument('-sf', '--savefig', action='store_true',
+                        help='Save the figure. Default is False')
+    parser.add_argument('--showfig', action='store_true', default=True,
                         help='Save the figure. Default is False')
     parser.add_argument('--debug', action='store_true',
                         help='Prints out the debug of the code. Default is False')
@@ -469,9 +472,9 @@ def plot_diffs(datatab, args):
     savefig = args.savefig
     bins = args.bins
     limits = args.limits
+    showfig = args.showfig
 
     call_logger()
-    # configure logger for this module
     logger = logging.getLogger('plot_diffs')
 
     data = pd.read_csv(datatab)
@@ -516,14 +519,6 @@ def plot_diffs(datatab, args):
     ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
                       fontsize=12)
-    if contour:
-        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "Calculatinig contours..."]))
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=200,
-                    percent=percents, colors=colours)
-        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "Done!"]))
-
     cb = plt.colorbar(sc, ax=ax_histy, pad=.02)
     cb.set_label(r'$|\mu|\ \mathrm{[mas\,yr^{-1}]}$', fontsize=20)
     cb.ax.tick_params(labelsize=14)
@@ -582,15 +577,31 @@ def plot_diffs(datatab, args):
     ax_scatter.set_xlabel(r'$\mathrm{\Delta\alpha\ [arcsec]}$', fontsize=20)
     ax_scatter.set_ylabel(r'$\mathrm{\Delta\delta\ [arcsec]}$', fontsize=20)
 
+    if contour:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Calculatinig contours..."]))
+        contours = contour_pdf(radiff, dediff, ax=ax_scatter, nbins=200,
+                               percent=percents, colors=colours)
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Done!"]))
+
+    # restart logger
+    call_logger()
+    logger = logging.getLogger('plot_diffs')
+
     if savefig:
         figpath = datatab.split('.')[0] + '.png'
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Saving figure at %s" % figpath]))
         plt.savefig(figpath, format='png', dpi=360)
-    showfig = True
+
     if showfig:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Showing figure..."]))
         plt.show()
     else:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Closing figure..."]))
         plt.close()
 
     return
