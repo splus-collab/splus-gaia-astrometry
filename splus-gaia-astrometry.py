@@ -78,7 +78,7 @@ def parser():
                         help='Radius to search Gaia around the tile centre. Default is 1.0 deg')
     parser.add_argument('-sl', '--sn_limit', type=float, default=10.0,
                         help='Signal-to-noise lower limit to be used in the crossmatch. Default is 10.0')
-    parser.add_argument('-o', '--output', type=str, default='results_stacked.csv',
+    parser.add_argument('-o', '--output', type=str, default='results_stacked',
                         help='Output name of the stacked catalogue. Default is results_stacked.csv')
     parser.add_argument('-b', '--bins', type=int, default=1000,
                         help='Number of bins in the histogram. Default is 1000')
@@ -658,7 +658,8 @@ if __name__ == '__main__':
                                       "No matches found. Exiting...",]))
         sys.exit(1)
     else:
-        file_to_save = os.path.join(args.workdir, args.output)
+        file_to_save = os.path.join(
+            args.workdir, ''.join([args.output, '.csv']))
         if os.path.isfile(file_to_save) and not args.clobber:
             gasp.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                             "File %s already exists. Use --clobber to force overwrite." %

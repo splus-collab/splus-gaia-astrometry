@@ -100,10 +100,11 @@ python3 splus-gaia-astrometry.py -t list_of_tiles.txt -f tiles_new_status.csv -d
 ```
 
 The above command will process the specified S-PLUS tiles from the given footprint file and compare their astrometry with Gaia DR3. It will use 4 cores for processing and create a figure (`results_stacked.png`) showing the difference between the astrometries. The contours in the figure will represent the percentiles entered with the option `--percents`.
+![Astrometry Differences](results_stacked.png)
 
 ## Output
 
-The script will generate a figure named `results_stacked.png` that displays the difference between the astrometries of S-PLUS and Gaia. The contours on the figure show the Probability Density Function, indicating the distribution of the astrometric differences.
+The script will generate a figure named after the `--output` option that displays the difference between the astrometries of S-PLUS and Gaia. The contours on the figure show the Probability Density Function, indicating the distribution of the astrometric differences.
 
 ## License
 
