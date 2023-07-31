@@ -6,19 +6,19 @@ This Python script calculates the differences between the astrometry (position m
 
 The following external packages are required to run the `splus-gaia-astrometry.py` script:
 
-- `astropy` (version 4.3.1): A powerful package for astronomy-related data manipulation and analysis.
+- `astropy`: A powerful package for astronomy-related data manipulation and analysis.
 
-- `astroquery` (version 0.4.3): A Python package for querying astronomical databases and web services.
+- `astroquery`: A Python package for querying astronomical databases and web services.
 
-- `colorlog` (version 5.0.1): A logging utility with colored output.
+- `colorlog`: A logging utility with colored output.
 
-- `gitpython` (version 3.1.18): A Python library to interact with Git repositories.
+- `gitpython`: A Python library to interact with Git repositories.
 
-- `matplotlib` (version 3.4.3): A widely used plotting library for creating high-quality visualizations.
+- `matplotlib`: A widely used plotting library for creating high-quality visualizations.
 
-- `numpy` (version 1.21.2): A fundamental package for scientific computing with Python.
+- `numpy`: A fundamental package for scientific computing with Python.
 
-- `pandas` (version 1.3.3): A library for data manipulation and analysis.
+- `pandas`: A library for data manipulation and analysis.
 
 - `statspack` (version 0.1.2): A package providing statistical functions.
 
