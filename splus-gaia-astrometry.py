@@ -46,11 +46,9 @@ def parser():
     parser = argparse.ArgumentParser(
         description='Calculate astrometric differences between S-PLUS and Gaia DR2 or DR3')
     parser.add_argument('-t', '--tiles', type=str,
-                        help='List of tiles to be processed. Default is tiles_new_status.csv',
-                        required=True)
-    parser.add_argument('-f', '--footprint', type=str,
-                        help='Fooprint file containing the positions of the S-PLUS tiles.',
-                        required=True)
+                        required=True, help='List of tiles to be processed')
+    parser.add_argument('-f', '--footprint', type=str, required=True,
+                        help='Fooprint file containing the positions of the S-PLUS tiles.')
     parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
                         help='Workdir path. Default is current directory',
                         required=False)
