@@ -473,6 +473,7 @@ def plot_diffs(datatab, args):
     bins = args.bins
     limits = args.limits
     showfig = args.showfig
+    verbose = args.verbose
 
     call_logger()
     logger = logging.getLogger('plot_diffs')
@@ -531,8 +532,9 @@ def plot_diffs(datatab, args):
     plt.setp(ax_scatter.get_xticklabels(), fontsize=14)
     plt.setp(ax_scatter.get_yticklabels(), fontsize=14)
 
-    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "Plotting histograms for the percentiles...",]))
+    if verbose:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Plotting histograms for the percentiles...",]))
     ax_histx.axvline(percra[0], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[1], color='k', linestyle='dashed', lw=1, zorder=1)
     ax_histx.axvline(percra[2], color='k', linestyle='dashed', lw=1, zorder=1)
@@ -549,23 +551,26 @@ def plot_diffs(datatab, args):
     ax_histy.axhline(percde[6], color='k', linestyle='dashed', lw=1, zorder=1)
 
     # build hists
-    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "Building histograms..."]))
+    if verbose:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Building histograms..."]))
     if radiff.size < 1000000:
         bins = np.arange(-lim, lim + binwidth, binwidth)
     else:
         bins = 1000
     xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
                     r'$\sigma = %.3f$' % np.std(radiff)])
-    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "Building RA histogram..."]))
+    if verbose:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Building RA histogram..."]))
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
     ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
                     r'$\sigma = %.3f$' % np.std(dediff)])
-    logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "Building DEC histogram...",]))
+    if verbose:
+        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Building DEC histogram...",]))
     yx, yy, _ = ax_histy.hist(dediff, bins=bins, orientation='horizontal',
                               label=ylbl, alpha=0.8, zorder=10)
     ax_histy.legend(loc='upper right', handlelength=0, fontsize=12)
@@ -580,8 +585,11 @@ def plot_diffs(datatab, args):
     if contour:
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Calculatinig contours..."]))
-        contours = contour_pdf(radiff, dediff, ax=ax_scatter, nbins=200,
-                               percent=percents, colors=colours)
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=200,
+                    percent=percents, colors=colours)
+        if verbose:
+            logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Done!"]))
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Done!"]))
 
@@ -596,12 +604,14 @@ def plot_diffs(datatab, args):
         plt.savefig(figpath, format='png', dpi=360)
 
     if showfig:
-        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "Showing figure..."]))
+        if verbose:
+            logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Showing figure..."]))
         plt.show()
     else:
-        logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "Closing figure..."]))
+        if verbose:
+            logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Closing figure..."]))
         plt.close()
 
     return
