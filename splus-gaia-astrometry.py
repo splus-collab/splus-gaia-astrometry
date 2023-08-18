@@ -335,7 +335,7 @@ class SplusGaiaAst(object):
             else:
                 try:
                     sample &= scat[self.clstar_column] > 0.95
-                finally:
+                except:
                     self.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                                     'Column for CLASS_STAR not found. Ignoring']))
             if self.fwhm_column is None:
@@ -475,6 +475,9 @@ def plot_diffs(datatab, args):
 
     call_logger()
     logger = logging.getLogger('plot_diffs')
+    
+    if not os.path.exists(datatab):
+        datatab += ".csv"
 
     data = pd.read_csv(datatab)
     mask = (data['radiff'] > -10) & (data['radiff'] < 10)
