@@ -46,15 +46,13 @@ def parser():
     parser = argparse.ArgumentParser(
         description='Calculate astrometric differences between S-PLUS and Gaia DR2 or DR3')
     parser.add_argument('-t', '--tiles', type=str,
-                        required=True, help='List of tiles to be processed')
-    parser.add_argument('-f', '--footprint', type=str, required=True,
+                        help='List of tiles to be processed')
+    parser.add_argument('-f', '--footprint', type=str,
                         help='Fooprint file containing the positions of the S-PLUS tiles.')
     parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
-                        help='Workdir path. Default is current directory',
-                        required=False)
+                        help='Workdir path. Default is current directory')
     parser.add_argument('-d', '--datadir', type=str, default=None,
-                        help='Data directory path. Default is workdir',
-                        required=False)
+                        help='Data directory path. Default is workdir')
     # Gaia DR2 =345; Gaia DR3 = 355
     parser.add_argument('-g', '--gaia_dr', type=str, default='355',
                         help='Gaia catalogue number as registered at Vizier. Default is 355 (Gaia DR3)')
@@ -80,6 +78,8 @@ def parser():
                         help='Signal-to-noise lower limit to be used in the crossmatch. Default is 10.0')
     parser.add_argument('-o', '--output', type=str, default='results_stacked',
                         help='Output name of the stacked catalogue. Default is results_stacked.csv')
+    parser.add_argument('--isstacked', action='store_true',
+                        help='If the catalogue is already stacked.')
     parser.add_argument('-b', '--bins', type=int, default=1000,
                         help='Number of bins in the histogram. Default is 1000')
     parser.add_argument('-l', '--limits', type=float, default=0.05,
@@ -88,14 +88,14 @@ def parser():
                         help='Number of cores to be used. Default is 1')
     parser.add_argument('--contour', action='store_true',
                         help='Plot the contour of the PDF. Default is False')
-    parser.add_argument('--colours', type=list, default=['limegreen', 'yellowgreen', 'c'],
+    parser.add_argument('--colours', type=str, default=['limegreen', 'yellowgreen', 'c'],
                         help="Colours of the histograms. Default is ['limegreen', 'yellowgreen', 'c']")
     parser.add_argument('--percents', type=str, default='[0.3,4.5,32]',
                         help="Percentiles of the contours (include the values without space separator). Default is 3, 2 and 1 sigma, or '[0.3,4.5,32]'")
     parser.add_argument('-sf', '--savefig', action='store_true',
                         help='Save the figure. Default is False')
     parser.add_argument('--showfig', action='store_true', default=True,
-                        help='Save the figure. Default is False')
+                        help='Show the figure. Default is True')
     parser.add_argument('--debug', action='store_true',
                         help='Prints out the debug of the code. Default is False')
     parser.add_argument('-vv', '--verbose', action='store_true',
@@ -466,7 +466,7 @@ def plot_diffs(datatab, args):
     """
     contour = args.contour
     percents = [float(x) for x in args.percents.strip('[]').split(',')]
-    colours = args.colours
+    colours = [x for x in args.colours.strip('[]').split(',')]
     savefig = args.savefig
     bins = args.bins
     limits = args.limits
@@ -475,7 +475,7 @@ def plot_diffs(datatab, args):
 
     call_logger()
     logger = logging.getLogger('plot_diffs')
-    
+
     if not os.path.exists(datatab):
         datatab += ".csv"
 
@@ -487,10 +487,14 @@ def plot_diffs(datatab, args):
     dediff = data['dediff'][mask]
     abspm = data['abspm'][mask]
 
-    percra = np.percentile(radiff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
+    axis_percs = [50]
+    for perc in percents:
+        axis_percs.append(perc / 2.)
+        axis_percs.append(100. - perc / 2.)
+    percra = np.percentile(radiff, axis_percs)
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             'Percentiles for RA: %s' % percra]))
-    percde = np.percentile(dediff, [0.15, 2.5, 16, 50, 84, 97.5, 99.85])
+    percde = np.percentile(dediff, axis_percs)
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             'Percentiles for DEC: %s' % percde]))
 
@@ -655,30 +659,37 @@ if __name__ == '__main__':
     gasp = SplusGaiaAst(args)
     gasp.datadir = args.datadir if args.datadir is not None else args.workdir
 
-    list_of_matches = gasp.execute()
-    if list_of_matches is None:
-        gasp.logger.error(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                      "No matches found. Exiting...",]))
-        sys.exit(1)
-    else:
-        file_to_save = os.path.join(
-            args.workdir, ''.join([args.output, '.csv']))
-        if os.path.isfile(file_to_save) and not args.clobber:
-            gasp.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                            "File %s already exists. Use --clobber to force overwrite." %
-                                            file_to_save]))
+    if not args.isstacked:
+        list_of_matches = gasp.execute()
+        if list_of_matches is None:
+            gasp.logger.error(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                          "No matches found. Exiting...",]))
+            sys.exit(1)
         else:
-            gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                         "Found %d matches. Starting staking" %
-                             len(list_of_matches)]))
-            # stack the results
-            stacked_results = vstack(list_of_matches)
-            gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                         "Saving results to %s" % file_to_save]))
-            stacked_results.write(file_to_save, format='csv', overwrite=True)
+            file_to_save = os.path.join(
+                args.workdir, ''.join([args.output, '.csv']))
+            if os.path.isfile(file_to_save) and not args.clobber:
+                gasp.logger.warning(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                "File %s already exists. Use --clobber to force overwrite." %
+                                                file_to_save]))
+            else:
+                gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             "Found %d matches. Starting staking" %
+                                 len(list_of_matches)]))
+                # stack the results
+                stacked_results = vstack(list_of_matches)
+                gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             "Saving results to %s" % file_to_save]))
+                stacked_results.write(
+                    file_to_save, format='csv', overwrite=True)
 
-    datatab = os.path.join(args.workdir, args.output)
+        datatab = os.path.join(args.workdir, args.output)
 
-    gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                     'Running plot module for table', datatab]))
-    plot_diffs(datatab, args)
+        gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                         'Running plot module for table', datatab]))
+        plot_diffs(datatab, args)
+    else:
+        datatab = os.path.join(args.workdir, args.output)
+        gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                         'Running plot module for table', datatab]))
+        plot_diffs(datatab, args)
