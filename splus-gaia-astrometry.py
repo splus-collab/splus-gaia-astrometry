@@ -563,7 +563,7 @@ def plot_diffs(datatab, args):
         bins = np.arange(-lim, lim + binwidth, binwidth)
     else:
         bins = 1000
-    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[3], '\n',
+    xlbl = "".join([r'$\overline{\Delta\alpha} = %.3f$' % percra[0], '\n',
                     r'$\sigma = %.3f$' % np.std(radiff)])
     if verbose:
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -571,7 +571,7 @@ def plot_diffs(datatab, args):
     xx, xy, _ = ax_histx.hist(radiff, bins=bins, label=xlbl,
                               alpha=0.8, zorder=10)
     ax_histx.legend(loc='upper right', handlelength=0, fontsize=12)
-    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[3], '\n',
+    ylbl = "".join([r'$\overline{\Delta\delta} = %.3f$' % percde[0], '\n',
                     r'$\sigma = %.3f$' % np.std(dediff)])
     if verbose:
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
