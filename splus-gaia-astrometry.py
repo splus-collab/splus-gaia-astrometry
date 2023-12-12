@@ -82,6 +82,8 @@ def parser():
                         help='If the catalogue is already stacked.')
     parser.add_argument('-b', '--bins', type=int, default=1000,
                         help='Number of bins in the histogram. Default is 1000')
+    parser.add_argument('--cbins', type=int, default=50,
+                        help='Number of bins in the contour. Default is 50')
     parser.add_argument('-l', '--limits', type=float, default=0.05,
                         help='Limit of the histogram. Default is 0.5')
     parser.add_argument('-nc', '--ncores', type=int, default=1,
@@ -590,8 +592,8 @@ def plot_diffs(datatab, args):
     if contour:
         logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "Calculatinig contours..."]))
-        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=200,
-                    percent=percents, colors=colours)
+        contour_pdf(radiff, dediff, ax=ax_scatter, nbins=args.cbins,
+                    pdf_resample=100, percent=percents, colors=colours)
         if verbose:
             logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                     "Done!"]))
