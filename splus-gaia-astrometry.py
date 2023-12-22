@@ -511,7 +511,7 @@ def plot_diffs(datatab, args):
     plt.figure(figsize=(9, 8))
 
     ax_scatter = plt.axes(rect_scatter)
-    ax_scatter.tick_params(direction='in', top=True, right=True)
+    ax_scatter.tick_params(direction='in', top=True, right=True, labelsize=14)
     ax_histx = plt.axes(rect_histx)
     ax_histx.tick_params(direction='in', labelbottom=False)
     ax_histy = plt.axes(rect_histy)
