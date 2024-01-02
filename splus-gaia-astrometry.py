@@ -90,7 +90,7 @@ def parser():
                         help='Number of cores to be used. Default is 1')
     parser.add_argument('--contour', action='store_true',
                         help='Plot the contour of the PDF. Default is False')
-    parser.add_argument('--colours', type=str, default="['limegreen', 'yellowgreen', 'c']",
+    parser.add_argument('--colours', type=str, default='[limegreen,yellowgreen,c]',
                         help="Colours of the histograms. Default is ['limegreen', 'yellowgreen', 'c']")
     parser.add_argument('--percents', type=str, default='[0.3,4.5,32]',
                         help="Percentiles of the contours (include the values without space separator). Default is 3, 2 and 1 sigma, or '[0.3,4.5,32]'")
