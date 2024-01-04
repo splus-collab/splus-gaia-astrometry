@@ -533,7 +533,7 @@ def plot_diffs(datatab, args):
 
     # now determine nice limits by hand:
     binwidth = limits
-    lim = np.ceil(np.abs([radiff, dediff]).max() / binwidth) * binwidth
+    lim = np.ceil(np.abs([radiff, dediff]).max() / binwidth) * (binwidth / 2)
     ax_scatter.set_xlim((-lim, lim))
     ax_scatter.set_ylim((-lim, lim))
     plt.setp(ax_scatter.get_xticklabels(), fontsize=14)
