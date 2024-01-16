@@ -513,15 +513,17 @@ def plot_diffs(datatab, args):
     ax_scatter = plt.axes(rect_scatter)
     ax_scatter.tick_params(direction='in', top=True, right=True, labelsize=14)
     ax_histx = plt.axes(rect_histx)
-    ax_histx.tick_params(direction='in', labelbottom=False)
+    ax_histx.tick_params(direction='in', labelbottom=False, labelsize=14)
+    ax_histx.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
     ax_histy = plt.axes(rect_histy)
-    ax_histy.tick_params(direction='in', labelleft=False)
+    ax_histy.tick_params(direction='in', labelleft=False, labelsize=14)
+    ax_histy.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
 
     lbl = r'$N = %i$' % len(radiff)
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "Starting plot..."]))
     sc = ax_scatter.scatter(radiff, dediff, c=abspm,
-                            s=10, cmap='plasma', label=lbl)
+                            s=5, cmap='plasma', label=lbl, alpha=0.75)
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "Finished scatter plot..."]))
     ax_scatter.grid()
