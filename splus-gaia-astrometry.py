@@ -25,6 +25,7 @@ import logging
 import colorlog
 import git
 from statspack import contour_pdf
+import gc
 
 __author__ = 'Fabio R Herpich'
 __email__ = 'fabio.herpich@ast.cam.ac.uk'
@@ -49,6 +50,8 @@ def parser():
                         help='List of tiles to be processed')
     parser.add_argument('-f', '--footprint', type=str,
                         help='Fooprint file containing the positions of the S-PLUS tiles.')
+    parser.add_argument('--tilescolname', type=str, default='NAME',
+                        help='Column name of the tile names in the footprint file. Default is NAME')
     parser.add_argument('-w', '--workdir', type=str, default=os.getcwd(),
                         help='Workdir path. Default is current directory')
     parser.add_argument('-d', '--datadir', type=str, default=None,
@@ -64,6 +67,8 @@ def parser():
                         help='Column name of the DEC in the catalogue. Default is DEC')
     parser.add_argument('-m', '--mag_column', type=str, default='MAG_AUTO',
                         help='Column name of the magnitude in the catalogue. Default is MAG_AUTO')
+    parser.add_argument('-me', '--mag_err', type=str, default=None,
+                        help='Column name of the magnitude error in the catalogue. Default is None')
     parser.add_argument('-fl', '--flags_column', type=str, default=None,
                         help='Column name of the flags in the catalogue. Default is None')
     parser.add_argument('-cs', '--clstar_column', type=str, default=None,
@@ -160,14 +165,19 @@ class SplusGaiaAst(object):
 
         # Load the data
         self.data_dict = self.load_data(fields)
+        _list_fields = list(self.data_dict.keys())
 
         # calc gaia and splus astrometry difference using ncores to parallelize
         pool = mp.Pool(processes=self.ncores)
         splus_gaia_astdiff = pool.map(
-            self.calculate_astdiff, list(self.data_dict.keys()))
+            self.calculate_astdiff, _list_fields)
         pool.close()
         pool.join()
-        return splus_gaia_astdiff
+
+        gc.collect()
+        del splus_gaia_astdiff
+        
+        return
 
     def get_fields(self):
         """
@@ -219,14 +229,14 @@ class SplusGaiaAst(object):
 
     def get_fields_names(self, footprint):
         """
-        Get the names of the fields in the footprint and correct them is necessary
+        Get the names of the fields in the footprint and correct them if necessary
         """
 
         try:
             field_names = np.array([n.replace('_', '-')
-                                    for n in footprint['NAME']])
+                                    for n in footprint[args.tilescolname]])
         except ValueError:
-            field_names = footprint['NAME']
+            field_names = footprint[args.tilescolname]
 
         return field_names
 
@@ -249,6 +259,12 @@ class SplusGaiaAst(object):
             if item.split('.')[0] in fields['NAME'].values:
                 data_dict[item.split('.')[0]] = os.path.join(
                     self.datadir, item)
+
+        if not data_dict:
+            for item in os.listdir(self.datadir):
+                if item.split('_')[0] in fields['NAME'].values:
+                    data_dict[item.split('_')[0]] = os.path.join(
+                        self.datadir, item)
 
         return data_dict
 
@@ -285,10 +301,10 @@ class SplusGaiaAst(object):
 
             return results
         else:
-            sra = self.foot_table['RA'][self.foot_table['NAME'] == tile]
-            sdec = self.foot_table['DEC'][self.foot_table['NAME'] == tile]
+            sra = self.foot_table['RA'][self.foot_table[args.tilescolname] == tile]
+            sdec = self.foot_table['DEC'][self.foot_table[args.tilescolname] == tile]
             tile_coords = SkyCoord(ra=sra[0], dec=sdec[0], unit=(
-                u.hour, u.deg), frame='icrs', equinox='J2000')
+                u.deg, u.deg), frame='icrs', equinox='J2000')
 
             gaia_cat_path = os.path.join(workdir, "".join(
                 ['gaia_', gaia_dr, '/', tile, '.csv']))
@@ -350,6 +366,8 @@ class SplusGaiaAst(object):
                                                 'SN column not available. Skipping using SN to object selection']))
             else:
                 sample &= scat[self.sn_column] > self.sn_limit
+            if args.mag_err is not None:
+                sample &= scat[args.mag_err] < 0.033
 
             finalscat = scat[separation & sample]
             finalgaia = gaia_data[idx][separation & sample]
@@ -378,7 +396,10 @@ class SplusGaiaAst(object):
                                          'Saving results to %s' % path_to_results]))
             results.to_csv(path_to_results, index=False)
 
-            return results
+            gc.collect()
+            del scat, gaia_data, finalscat, finalgaia, results, radiff, dediff, abspm, mask
+
+            return
 
     def get_gaia(self, tile_coords, tilename, workdir=None, gaia_dr=None, angle=1.0):
         """
@@ -410,43 +431,52 @@ class SplusGaiaAst(object):
         gaia_dr = gaia_dr if self.gaia_dr is None else self.gaia_dr
         angle = angle if self.angle is None else self.angle
 
-        # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
-        self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                     'Querying gaia/vizier for tile %s' % tilename]))
-        v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
-                   catalog='I/' + str(gaia_dr))
-        v.ROW_LIMIT = 999999999
-        # change cache location to workdir path to avoid $HOME overfill
-        cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
-        if not os.path.isdir(cache_path):
-            try:
-                os.makedirs(cache_path, exist_ok=True)
-            except FileExistsError:
-                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                             "File %s already exists. Skipping", cache_path]))
-        v.cache_location = cache_path
-        gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
-        # mask all nan objects in the coordinates columns before saving the catalogue
-        mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
-        gaia_data = gaia_data[~mask]
-        if self.verbose:
-            print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  'Gaia_data is %s' % gaia_data)
-
-        # save Gaia's catalogue to workdir
         gaia_cat_path = os.path.join(workdir, "".join(
             ['gaia_', gaia_dr, '/', tilename, '_gaiacat.csv']))
-        if not os.path.isdir(os.path.join(workdir, " - ".join(['gaia_', gaia_dr]))):
-            try:
-                os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
-            except FileExistsError:
-                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                             "File %s already exists. Skipping",
-                                             os.path.join(workdir, "".join(['gaia_', gaia_dr]))]))
-        if self.verbose:
+        if os.path.isfile(gaia_cat_path):
             self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                         'Saving gaia catalogue to cache %s', gaia_cat_path]))
-        gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
+                                         'Gaia catalogue for tile %s already exists. Skipping query' % tilename]))
+            gaia_data = ascii.read(gaia_cat_path, format='csv')
+
+            return gaia_data
+        else:
+            # query Vizier for Gaia's catalogue using gaia_dr number. gaia_dr number needs to be known beforehand
+            self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                         'Querying gaia/vizier for tile %s' % tilename]))
+            v = Vizier(columns=['*', 'RAJ2000', 'DEJ2000'],
+                       catalog='I/' + str(gaia_dr))
+            v.ROW_LIMIT = 999999999
+            # change cache location to workdir path to avoid $HOME overfill
+            cache_path = os.path.join(workdir, '.astropy/cache/astroquery/Vizier/')
+            if not os.path.isdir(cache_path):
+                try:
+                    os.makedirs(cache_path, exist_ok=True)
+                except FileExistsError:
+                    self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                                 "File %s already exists. Skipping", cache_path]))
+            v.cache_location = cache_path
+            gaia_data = v.query_region(tile_coords, radius=Angle(angle, "deg"))[0]
+            # mask all nan objects in the coordinates columns before saving the catalogue
+            mask = gaia_data['RAJ2000'].mask & gaia_data['DEJ2000'].mask
+            gaia_data = gaia_data[~mask]
+            if self.verbose:
+                print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                      'Gaia_data is %s' % gaia_data)
+
+            # save Gaia's catalogue to workdir
+            if not os.path.isdir(os.path.join(workdir, "".join(['gaia_', gaia_dr]))):
+                try:
+                    os.mkdir(os.path.join(workdir, "".join(['gaia_', gaia_dr])))
+                except FileExistsError:
+                    self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                     "File %s already exists. Skipping" % os.path.join(workdir, "".join(['gaia_', gaia_dr])),
+                                     os.path.join(workdir, "".join(['gaia_', gaia_dr]))]))
+            if self.verbose:
+                self.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             'Saving gaia catalogue to cache %s', gaia_cat_path]))
+            gaia_data.to_pandas().to_csv(gaia_cat_path, index=False)
+
+        gc.collect()
 
         return gaia_data
 
@@ -526,7 +556,7 @@ def plot_diffs(datatab, args):
                             s=5, cmap='plasma', label=lbl, alpha=0.75)
     logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "Finished scatter plot..."]))
-    ax_scatter.grid()
+    # ax_scatter.grid()
     ax_scatter.legend(loc='upper right', handlelength=0, scatterpoints=1,
                       fontsize=12)
     cb = plt.colorbar(sc, ax=ax_histy, pad=.02)
@@ -664,8 +694,9 @@ if __name__ == '__main__':
     gasp.datadir = args.datadir if args.datadir is not None else args.workdir
 
     if not args.isstacked:
-        list_of_matches = gasp.execute()
-        if list_of_matches is None:
+        gasp.execute()
+        list_of_matches = os.listdir(os.path.join(args.workdir, 'results/'))
+        if list_of_matches is None or len(list_of_matches) == 0:
             gasp.logger.error(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                           "No matches found. Exiting...",]))
             sys.exit(1)
@@ -681,11 +712,16 @@ if __name__ == '__main__':
                                              "Found %d matches. Starting staking" %
                                  len(list_of_matches)]))
                 # stack the results
-                stacked_results = vstack(list_of_matches)
+                df0 = pd.read_csv(os.path.join(
+                    args.workdir, 'results/', list_of_matches[0]))
+                for f in list_of_matches[1:]:
+                    if f.split('.')[-1] != 'csv':
+                        list_of_matches.remove(f)
+                    df = pd.read_csv(os.path.join(args.workdir, 'results/', f))
+                    df0 = pd.concat([df0, df], ignore_index=True)
                 gasp.logger.info(" - ".join([datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                              "Saving results to %s" % file_to_save]))
-                stacked_results.write(
-                    file_to_save, format='csv', overwrite=True)
+                df0.to_csv(file_to_save, index=False)
 
         datatab = os.path.join(args.workdir, args.output)
 
